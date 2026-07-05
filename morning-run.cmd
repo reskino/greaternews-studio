@@ -1,0 +1,6 @@
+@echo off
+rem GreaterNews morning run - scheduled daily. Writes today's verified content pack to /content.
+cd /d C:\GreaterNews
+echo ===== GreaterNews morning run started %date% %time% ===== >> C:\GreaterNews\content\morning-run.log
+claude -p "Read C:\GreaterNews\GreaterNews_Master_Prompt.md and follow it strictly as the GreaterNews content engine. Do the Daily run now. Search the web for todays top stories in each bucket: Ghana politics 1-2, Ghana business 1, sports 1-2, entertainment 1, world 1-2, tech optional. Verify every story with two or more independent current sources and label single-source stories DEVELOPING. Check the files in C:\GreaterNews\content and posted_log.md first so no story repeats. Then write the story menu plus complete content packs for the top 5 stories in all output formats to a new file named C:\GreaterNews\content\greaternews_DATE.md where DATE is todays date in YYYY-MM-DD format. Include the source URLs you verified against. Do not post anything anywhere. End the file with a list of any DEVELOPING stories that need follow-up." --allowedTools "Read,Write,Glob,Grep,WebSearch,WebFetch" >> C:\GreaterNews\content\morning-run.log 2>&1
+echo ===== GreaterNews morning run finished %date% %time% ===== >> C:\GreaterNews\content\morning-run.log
