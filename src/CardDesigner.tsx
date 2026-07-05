@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { CardFormat, CardTemplate, ChipLabel } from './cardEngine';
 import { drawCard, formatSizes, templateMeta } from './cardEngine';
 import type { ImageResult } from './imageSearch';
-import { buildStoryQueries, dedupeResults, loadImage, loadImageWithProxyFallback, searchCommons, searchOpenverse } from './imageSearch';
+import { dedupeResults, findStoryImages, loadImage, loadImageWithProxyFallback, searchCommons, searchOpenverse } from './imageSearch';
 
 type CardDesignerProps = {
   suggestedHeadline: string;
@@ -60,6 +60,7 @@ export default function CardDesigner({ suggestedHeadline, suggestedSource, sugge
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState('');
   const [results, setResults] = useState<ImageResult[]>([]);
+  const [storyQueries, setStoryQueries] = useState<string[]>([]);
   const [loadingImageId, setLoadingImageId] = useState('');
 
   useEffect(() => {
@@ -163,13 +164,26 @@ export default function CardDesigner({ suggestedHeadline, suggestedSource, sugge
   }
 
   async function findImagesForStory() {
-    const queries = buildStoryQueries(suggestedHeadline, suggestedCategory);
-    if (queries.length === 0) {
+    if (!suggestedHeadline.trim() || searching) {
       setSearchError('Select a story with a headline first.');
       return;
     }
-    setQuery(queries[0]);
-    await executeSearch(queries);
+
+    setSearching(true);
+    setSearchError('');
+    setResults([]);
+
+    try {
+      const { results: found, queries } = await findStoryImages(suggestedHeadline, suggestedCategory);
+      setStoryQueries(queries);
+      setResults(found);
+      if (found.length === 0) {
+        setSearchError('No matching free images found. Try a chip below, search the place or organization by hand, or upload your own photo.');
+      }
+    } catch {
+      setSearchError('Image search is unreachable right now. Check the connection and try again.');
+    }
+    setSearching(false);
   }
 
   async function useSearchResult(result: ImageResult) {
@@ -313,6 +327,26 @@ export default function CardDesigner({ suggestedHeadline, suggestedSource, sugge
           <button type="button" className="secondary story-finder" onClick={() => void findImagesForStory()} disabled={searching}>
             {searching ? 'Finding images…' : '✦ Find images for the selected story'}
           </button>
+
+          {storyQueries.length > 0 ? (
+            <div className="query-chips">
+              <span className="designer-note">Steer the search:</span>
+              {storyQueries.map((storyQuery) => (
+                <button
+                  key={storyQuery}
+                  type="button"
+                  className="bucket-chip query-chip"
+                  disabled={searching}
+                  onClick={() => {
+                    setQuery(storyQuery);
+                    void executeSearch([storyQuery]);
+                  }}
+                >
+                  {storyQuery}
+                </button>
+              ))}
+            </div>
+          ) : null}
 
           {searchError ? <p className="designer-note danger-note">{searchError}</p> : null}
 

@@ -736,6 +736,26 @@ pre {
     font-weight: 600;
 }
 
+.query-chips {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+}
+
+.query-chips .designer-note {
+    margin: 0;
+}
+
+.query-chip {
+    cursor: pointer;
+    color: var(--text);
+}
+
+.query-chip:hover {
+    border-color: rgba(243, 196, 87, 0.4);
+}
+
 .image-results {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));

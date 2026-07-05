@@ -1,5 +1,11 @@
 # Update Log
 
+## 1.3.0 - 2026-07-05
+- Rebuilt "Find images for the selected story" after it returned irrelevant results. It now: extracts the people/places/organizations from the headline (instead of mashing all words into one query), pulls each entity's Wikipedia lead image (the canonical photo, license-verified against Commons so fair-use files are excluded), searches Commons and Openverse per entity, and ranks results by relevance.
+- Added a Ghana acronym dictionary (BoG → Bank of Ghana, GFA, ECG, COCOBOD, NPP/NDC, etc.) so abbreviations resolve to the right entity — "BoG" previously matched "Bog", the swamp.
+- Added steer-the-search chips: after an auto-search, each extracted entity is a clickable chip to rerun that query alone.
+- Verified against real headlines: the Bank of Ghana jobs story now returns BoG headquarters and the Accra skyline; the Tourism Authority story returns the Ministry of Tourism logo and Ghana tourism sites.
+
 ## 1.2.0 - 2026-07-05
 - Posted log backup and restore: "Backup (JSON)" downloads the full log; "Import backup" merges a backup file in (duplicates skipped) — protects the never-repeat history from browser data loss.
 - Engagement tracking: each logged post now has reach / reactions / shares fields; once 3+ posts have numbers, an Audience Insight callout shows the best-performing category.
