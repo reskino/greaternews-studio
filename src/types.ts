@@ -45,6 +45,9 @@ export type PostedLogEntry = {
   category: StoryCategory;
   source: string;
   status: StoryStatus;
+  reach?: number;
+  reactions?: number;
+  shares?: number;
 };
 
 export type FeedSource = {

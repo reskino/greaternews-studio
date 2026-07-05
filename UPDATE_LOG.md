@@ -1,5 +1,12 @@
 # Update Log
 
+## 1.2.0 - 2026-07-05
+- Posted log backup and restore: "Backup (JSON)" downloads the full log; "Import backup" merges a backup file in (duplicates skipped) — protects the never-repeat history from browser data loss.
+- Engagement tracking: each logged post now has reach / reactions / shares fields; once 3+ posts have numbers, an Audience Insight callout shows the best-performing category.
+- Recap card one-click fill: "Fill from this week's log" drops the week's logged headlines and date range straight into the Week in Review template.
+- Google News fallback titles no longer carry the trailing "- Outlet" suffix.
+- Deployed live to https://reskino.github.io/greaternews-studio/ (public repo github.com/reskino/greaternews-studio).
+
 ## 1.1.0 - 2026-07-05
 - Feed reliability: every source now has a three-step fallback — direct feed via rss2json, then that outlet's stories via Google News RSS, then the raw feed XML through a CORS proxy with our own RSS/Atom parser. Fixes the failing GhanaWeb / Citi Newsroom / Al Jazeera feeds.
 - Added "Copy Claude brief" in the draft step: packages the selected story plus all house rules into one prompt for Claude, which verifies the story and writes the entire pack.

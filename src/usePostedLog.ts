@@ -52,9 +52,22 @@ export function usePostedLog() {
     setPostedLog((current) => current.map((entry) => (entry.id === id ? { ...entry, status: 'READY' as const } : entry)));
   }
 
+  function updateEngagement(id: string, field: 'reach' | 'reactions' | 'shares', value: string) {
+    const parsed = value.trim() === '' ? undefined : Math.max(0, Number(value) || 0);
+    setPostedLog((current) => current.map((entry) => (entry.id === id ? { ...entry, [field]: parsed } : entry)));
+  }
+
+  function importEntries(entries: PostedLogEntry[]) {
+    setPostedLog((current) => {
+      const known = new Set(current.map((entry) => entry.id));
+      const fresh = entries.filter((entry) => entry && typeof entry.id === 'string' && !known.has(entry.id));
+      return [...fresh, ...current].sort((a, b) => (b.loggedAt ?? b.date).localeCompare(a.loggedAt ?? a.date));
+    });
+  }
+
   function clearLog() {
     setPostedLog([]);
   }
 
-  return { postedLog, logStory, markFollowedUp, clearLog };
+  return { postedLog, logStory, markFollowedUp, updateEngagement, importEntries, clearLog };
 }

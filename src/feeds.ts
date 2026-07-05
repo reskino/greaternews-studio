@@ -407,9 +407,13 @@ function googleNewsFeedUrl(domain: string) {
 // Outlets sometimes block rss2json's fetcher. Fall back to that outlet's stories
 // via Google News RSS, then to the raw feed XML through a CORS proxy.
 async function fetchFeedItems(source: FeedSource, signal?: AbortSignal): Promise<FeedItem[]> {
+  // Google News appends " - Publisher" to every title; strip that trailing segment.
+  const stripOutletSuffix = (items: FeedItem[]) =>
+    items.map((item) => ({ ...item, title: item.title.replace(/\s+-\s+[^-]+$/, '').trim() || item.title }));
+
   const attempts: Array<() => Promise<FeedItem[]>> = [
     () => fetchViaRss2Json(source.url, signal),
-    () => fetchViaRss2Json(googleNewsFeedUrl(source.newsDomain), signal),
+    () => fetchViaRss2Json(googleNewsFeedUrl(source.newsDomain), signal).then(stripOutletSuffix),
     () => fetchRawXml(source.url, signal),
   ];
 

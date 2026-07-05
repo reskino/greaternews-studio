@@ -8,6 +8,8 @@ type CardDesignerProps = {
   suggestedHeadline: string;
   suggestedSource: string;
   suggestedCategory: string;
+  weeklyHeadlines: string[];
+  weeklyRange: string;
 };
 
 const templateOrder: CardTemplate[] = ['headline', 'quote', 'update', 'stat', 'recap'];
@@ -34,7 +36,7 @@ function initialTemplate(): CardTemplate {
   return (templateOrder as string[]).includes(requested) ? (requested as CardTemplate) : 'headline';
 }
 
-export default function CardDesigner({ suggestedHeadline, suggestedSource, suggestedCategory }: CardDesignerProps) {
+export default function CardDesigner({ suggestedHeadline, suggestedSource, suggestedCategory, weeklyHeadlines, weeklyRange }: CardDesignerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const photoUrlRef = useRef<string>('');
   const [template, setTemplate] = useState<CardTemplate>(initialTemplate);
@@ -413,10 +415,25 @@ export default function CardDesigner({ suggestedHeadline, suggestedSource, sugge
           ) : null}
 
           {template === 'recap' ? (
-            <label>
-              <span>Subtitle (e.g. the date range)</span>
-              <input value={attribution} onChange={(event) => setAttribution(event.target.value)} placeholder="e.g. June 29 – July 4, 2026" />
-            </label>
+            <>
+              <button
+                type="button"
+                className="secondary story-finder"
+                onClick={() => {
+                  setHeadline(weeklyHeadlines.join('\n'));
+                  setAttribution(weeklyRange);
+                }}
+                disabled={weeklyHeadlines.length === 0}
+              >
+                {weeklyHeadlines.length > 0
+                  ? `✦ Fill from this week's log (${weeklyHeadlines.length} stories)`
+                  : 'No logged stories this week yet'}
+              </button>
+              <label>
+                <span>Subtitle (e.g. the date range)</span>
+                <input value={attribution} onChange={(event) => setAttribution(event.target.value)} placeholder="e.g. June 29 – July 4, 2026" />
+              </label>
+            </>
           ) : null}
 
           <div className="field-grid">

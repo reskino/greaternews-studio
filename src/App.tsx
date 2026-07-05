@@ -3,10 +3,10 @@ import CardDesigner from './CardDesigner';
 import { fetchAllFeeds, feedSources, isAlreadyPosted, selectMenuStories, storyBuckets, storyTemplates } from './feeds';
 import { buildClaudeBrief, buildDailyPack, buildOutputs, buildPostedLogFile } from './outputs';
 import { downloadText, formatDateTime } from './text';
-import type { CommandMode, LiveFeedState, StoryCategory, StoryDraft, StoryStatus } from './types';
+import type { CommandMode, LiveFeedState, PostedLogEntry, StoryCategory, StoryDraft, StoryStatus } from './types';
 import { usePostedLog } from './usePostedLog';
 
-const APP_VERSION = '1.1.0';
+const APP_VERSION = '1.2.0';
 const today = new Date().toISOString().slice(0, 10);
 
 const commandModes: Array<{ value: CommandMode; label: string }> = [
@@ -55,7 +55,8 @@ export default function App() {
     error: '',
     failedFeeds: [],
   });
-  const { postedLog, logStory, markFollowedUp, clearLog } = usePostedLog();
+  const { postedLog, logStory, markFollowedUp, updateEngagement, importEntries, clearLog } = usePostedLog();
+  const [importMessage, setImportMessage] = useState('');
 
   async function refreshLiveStories(signal?: AbortSignal) {
     setLiveFeedState((current) => ({ ...current, loading: true, message: 'Refreshing live sources…', error: '' }));
@@ -103,8 +104,60 @@ export default function App() {
 
   const followUps = postedLog.filter((entry) => entry.status === 'DEVELOPING');
 
+  const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
+  const weekEntries = postedLog.filter((entry) => entry.date >= weekAgo);
+  const weeklyHeadlines = weekEntries.slice(0, 5).map((entry) => entry.title);
+  const weekDates = weekEntries.map((entry) => entry.date).sort();
+  const friendlyDay = (iso: string) => new Date(`${iso}T00:00:00`).toLocaleDateString('en-GH', { month: 'long', day: 'numeric' });
+  const weeklyRange =
+    weekDates.length > 0 ? `${friendlyDay(weekDates[0])} – ${friendlyDay(weekDates[weekDates.length - 1])}, ${weekDates[weekDates.length - 1].slice(0, 4)}` : '';
+
+  const measured = postedLog.filter((entry) => typeof entry.reactions === 'number');
+  let insight = '';
+  if (measured.length >= 3) {
+    const byCategory = new Map<string, { sum: number; count: number }>();
+    for (const entry of measured) {
+      const bucket = byCategory.get(entry.category) ?? { sum: 0, count: 0 };
+      bucket.sum += entry.reactions ?? 0;
+      bucket.count += 1;
+      byCategory.set(entry.category, bucket);
+    }
+    const ranked = [...byCategory.entries()]
+      .map(([category, bucket]) => ({ category, avg: bucket.sum / bucket.count, count: bucket.count }))
+      .sort((a, b) => b.avg - a.avg);
+    const best = ranked[0];
+    insight = `Best performing category so far: ${best.category} — averaging ${Math.round(best.avg)} reactions over ${best.count} post${best.count > 1 ? 's' : ''}. Lean into what works.`;
+  }
+
   function updateDraft(field: keyof StoryDraft, value: string) {
     setDraft((current) => ({ ...current, [field]: value }));
+  }
+
+  function backupLog() {
+    downloadText(`greaternews_log_backup_${date}.json`, JSON.stringify(postedLog, null, 2));
+  }
+
+  function handleImportFile(files: FileList | null) {
+    const file = files?.[0];
+    if (!file) {
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const parsed = JSON.parse(String(reader.result)) as PostedLogEntry[];
+        if (!Array.isArray(parsed)) {
+          throw new Error('Not a backup file');
+        }
+        importEntries(parsed);
+        setImportMessage(`Imported ${parsed.length} entries (duplicates skipped).`);
+      } catch {
+        setImportMessage('Could not read that file — use a JSON backup made with the Backup button.');
+      }
+      window.setTimeout(() => setImportMessage(''), 4000);
+    };
+    reader.readAsText(file);
   }
 
   return (
@@ -362,7 +415,13 @@ export default function App() {
 
       <div className="step-wrap">
         <p className="eyebrow step-eyebrow">Step 4 — Card Studio</p>
-        <CardDesigner suggestedHeadline={draft.headline} suggestedSource={draft.primarySource} suggestedCategory={draft.category} />
+        <CardDesigner
+          suggestedHeadline={draft.headline}
+          suggestedSource={draft.primarySource}
+          suggestedCategory={draft.category}
+          weeklyHeadlines={weeklyHeadlines}
+          weeklyRange={weeklyRange}
+        />
       </div>
 
       <section className="card step-card">
@@ -375,6 +434,13 @@ export default function App() {
             <button type="button" className="secondary" onClick={() => downloadText('posted_log.md', buildPostedLogFile(postedLog))}>
               Export log
             </button>
+            <button type="button" className="secondary" onClick={backupLog}>
+              Backup (JSON)
+            </button>
+            <label className="secondary file-button">
+              Import backup
+              <input type="file" accept=".json,application/json" hidden onChange={(event) => handleImportFile(event.target.files)} />
+            </label>
             <button type="button" className="secondary" onClick={clearLog}>
               Clear log
             </button>
@@ -383,6 +449,18 @@ export default function App() {
             </button>
           </div>
         </div>
+
+        {importMessage ? <p className="feed-status">{importMessage}</p> : null}
+        {insight ? (
+          <div className="callout insight-callout">
+            <strong>Audience insight</strong>
+            <p>{insight}</p>
+          </div>
+        ) : (
+          <p className="feed-status">
+            Tip: after each post has been up for a day, fill in reach / reactions / shares below — once 3+ posts have numbers, the studio shows which categories grow the page.
+          </p>
+        )}
 
         {followUps.length > 0 ? (
           <div className="callout followup-callout">
@@ -415,6 +493,20 @@ export default function App() {
                   {entry.date} | {entry.category} | {entry.source} | {entry.status}
                   {entry.loggedAt ? ` | ${formatDateTime(entry.loggedAt)}` : ''}
                 </p>
+                <div className="log-metrics">
+                  {(['reach', 'reactions', 'shares'] as const).map((field) => (
+                    <label key={field} className="metric-input">
+                      <span>{field}</span>
+                      <input
+                        type="number"
+                        min={0}
+                        placeholder="—"
+                        value={entry[field] ?? ''}
+                        onChange={(event) => updateEngagement(entry.id, field, event.target.value)}
+                      />
+                    </label>
+                  ))}
+                </div>
               </div>
             ))
           ) : (
