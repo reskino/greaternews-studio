@@ -1,5 +1,5 @@
 export type CardFormat = 'portrait' | 'square' | 'story';
-export type CardTemplate = 'headline' | 'quote' | 'update' | 'stat' | 'recap';
+export type CardTemplate = 'headline' | 'quote' | 'update' | 'stat' | 'recap' | 'post';
 export type ChipLabel = 'UPDATE' | 'DEVELOPING' | 'BREAKING';
 
 export type CardOptions = {
@@ -12,6 +12,8 @@ export type CardOptions = {
   attribution: string;
   chip: ChipLabel;
   statValue: string;
+  postHandle: string;
+  postMeta: string;
   footer: string;
   handle: string;
   accent: string;
@@ -37,6 +39,7 @@ export const templateMeta: Record<CardTemplate, { label: string; note: string }>
   update: { label: 'Update', note: 'Follow-up card with an UPDATE / DEVELOPING / BREAKING banner.' },
   stat: { label: 'Stat', note: 'One big number with what it means.' },
   recap: { label: 'Recap', note: 'Week in review — up to five headlines, one per line.' },
+  post: { label: 'Social post', note: 'A statement rendered as a social-style post — our own graphic, no screenshot needed.' },
 };
 
 export const chipColors: Record<ChipLabel, string> = {
@@ -551,6 +554,120 @@ function drawRecapTemplate(ctx: CanvasCtx, width: number, height: number, option
   drawBottomStrips(ctx, width, height, options);
 }
 
+function drawPostTemplate(ctx: CanvasCtx, width: number, height: number, options: CardOptions) {
+  const photoHeight = Math.round(height * (options.format === 'square' ? 0.24 : 0.28));
+  drawBase(ctx, width, height, photoHeight, options);
+  drawLogoBadge(ctx, width, options);
+  const brandBottom = drawBrandStrip(ctx, width, photoHeight + Math.round(height * 0.006));
+
+  const name = options.attribution.trim() || 'Name of the speaker';
+  const postHandle = options.postHandle.trim();
+  const postMeta = options.postMeta.trim();
+  const text = options.headline.trim() || 'Paste their exact words here';
+
+  const boxX = Math.round(width * 0.08);
+  const boxWidth = width - boxX * 2;
+  const pad = Math.round(width * 0.05);
+  const avatarSize = Math.round(width * 0.085);
+  const boxTop = brandBottom + Math.round(height * 0.028);
+  const maxBoxBottom = height - bottomReserve(height, options) - Math.round(height * 0.02);
+  const textMaxWidth = boxWidth - pad * 2;
+
+  // Fit the post text first so the box height can wrap around it.
+  const words = splitHeadlineWords(text, '');
+  let fontSize = Math.round(width * 0.042);
+  let lines: HeadlineWord[][] = [];
+  const nameFontSize = Math.round(width * 0.03);
+  const handleFontSize = Math.round(width * 0.023);
+  const metaFontSize = Math.round(width * 0.021);
+  const headerHeight = Math.max(avatarSize, nameFontSize + handleFontSize + 10);
+
+  while (fontSize >= 26) {
+    ctx.font = `600 ${fontSize}px ${FONT_STACK}`;
+    lines = layoutLines(ctx, words, textMaxWidth);
+    const textHeight = lines.length * fontSize * 1.34;
+    const boxHeight = pad + headerHeight + Math.round(height * 0.022) + textHeight + (postMeta ? metaFontSize * 2.6 : pad * 0.6) + pad * 0.8;
+    if (boxTop + boxHeight <= maxBoxBottom) {
+      break;
+    }
+    fontSize -= 3;
+  }
+
+  ctx.font = `600 ${fontSize}px ${FONT_STACK}`;
+  const lineHeight = fontSize * 1.34;
+  const textHeight = lines.length * lineHeight;
+  const boxHeight = pad + headerHeight + Math.round(height * 0.022) + textHeight + (postMeta ? metaFontSize * 2.6 : pad * 0.6) + pad * 0.8;
+
+  tracePill(ctx, boxX, boxTop, boxWidth, boxHeight, Math.round(width * 0.03));
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.055)';
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.14)';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  // Avatar circle with initials.
+  const avatarX = boxX + pad + avatarSize / 2;
+  const avatarY = boxTop + pad + avatarSize / 2;
+  ctx.beginPath();
+  ctx.arc(avatarX, avatarY, avatarSize / 2, 0, Math.PI * 2);
+  ctx.fillStyle = options.accent;
+  ctx.fill();
+  const initials = name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((word) => word[0]?.toUpperCase() ?? '')
+    .join('');
+  ctx.fillStyle = '#081110';
+  ctx.font = `800 ${Math.round(avatarSize * 0.42)}px ${FONT_STACK}`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(initials || 'GN', avatarX, avatarY + 1);
+
+  // Name and handle.
+  const headerTextX = boxX + pad + avatarSize + Math.round(width * 0.024);
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
+  ctx.font = `700 ${nameFontSize}px ${FONT_STACK}`;
+  ctx.fillStyle = '#ffffff';
+  ctx.fillText(name, headerTextX, boxTop + pad + (avatarSize - headerHeight) / 2 + 2, boxWidth - (headerTextX - boxX) - pad);
+  if (postHandle) {
+    ctx.font = `500 ${handleFontSize}px ${FONT_STACK}`;
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.55)';
+    ctx.fillText(postHandle, headerTextX, boxTop + pad + (avatarSize - headerHeight) / 2 + nameFontSize + 8);
+  }
+
+  // Post text, left aligned.
+  const textTop = boxTop + pad + headerHeight + Math.round(height * 0.022);
+  ctx.font = `600 ${fontSize}px ${FONT_STACK}`;
+  const spaceWidth = ctx.measureText(' ').width;
+  lines.forEach((line, lineIndex) => {
+    let x = boxX + pad;
+    const y = textTop + lineIndex * lineHeight;
+    ctx.fillStyle = '#ffffff';
+    for (const word of line) {
+      ctx.fillText(word.text, x, y);
+      x += ctx.measureText(word.text).width + spaceWidth;
+    }
+  });
+
+  // Divider + meta line.
+  if (postMeta) {
+    const metaY = textTop + textHeight + metaFontSize * 0.9;
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(boxX + pad, metaY);
+    ctx.lineTo(boxX + boxWidth - pad, metaY);
+    ctx.stroke();
+    ctx.font = `500 ${metaFontSize}px ${FONT_STACK}`;
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+    ctx.fillText(postMeta, boxX + pad, metaY + metaFontSize * 0.7);
+  }
+
+  drawBottomStrips(ctx, width, height, options);
+}
+
 export function drawCard(canvas: HTMLCanvasElement, options: CardOptions) {
   const { width, height } = formatSizes[options.format];
   canvas.width = width;
@@ -573,6 +690,9 @@ export function drawCard(canvas: HTMLCanvasElement, options: CardOptions) {
       break;
     case 'recap':
       drawRecapTemplate(ctx, width, height, options);
+      break;
+    case 'post':
+      drawPostTemplate(ctx, width, height, options);
       break;
     default:
       drawHeadlineTemplate(ctx, width, height, options);

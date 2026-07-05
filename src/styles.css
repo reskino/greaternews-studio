@@ -756,6 +756,19 @@ pre {
     border-color: rgba(243, 196, 87, 0.4);
 }
 
+.ref-preview {
+    display: grid;
+    gap: 8px;
+}
+
+.ref-preview img {
+    width: 100%;
+    max-height: 220px;
+    object-fit: cover;
+    border-radius: 14px;
+    border: 1px dashed rgba(255, 107, 107, 0.5);
+}
+
 .image-results {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));

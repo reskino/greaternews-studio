@@ -8,11 +8,12 @@ type CardDesignerProps = {
   suggestedHeadline: string;
   suggestedSource: string;
   suggestedCategory: string;
+  suggestedLink: string;
   weeklyHeadlines: string[];
   weeklyRange: string;
 };
 
-const templateOrder: CardTemplate[] = ['headline', 'quote', 'update', 'stat', 'recap'];
+const templateOrder: CardTemplate[] = ['headline', 'quote', 'update', 'stat', 'recap', 'post'];
 const chipOrder: ChipLabel[] = ['UPDATE', 'DEVELOPING', 'BREAKING'];
 const defaultHandle = '@GreaterNews · News You Can Trust';
 
@@ -22,6 +23,7 @@ const headlineLabels: Record<CardTemplate, string> = {
   update: 'The update headline',
   stat: 'Stat label (what the number means)',
   recap: 'Headlines — one per line (max 5)',
+  post: 'The post text (their exact words)',
 };
 
 function initialParam(name: string, fallback: string) {
@@ -36,7 +38,14 @@ function initialTemplate(): CardTemplate {
   return (templateOrder as string[]).includes(requested) ? (requested as CardTemplate) : 'headline';
 }
 
-export default function CardDesigner({ suggestedHeadline, suggestedSource, suggestedCategory, weeklyHeadlines, weeklyRange }: CardDesignerProps) {
+export default function CardDesigner({
+  suggestedHeadline,
+  suggestedSource,
+  suggestedCategory,
+  suggestedLink,
+  weeklyHeadlines,
+  weeklyRange,
+}: CardDesignerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const photoUrlRef = useRef<string>('');
   const [template, setTemplate] = useState<CardTemplate>(initialTemplate);
@@ -45,6 +54,11 @@ export default function CardDesigner({ suggestedHeadline, suggestedSource, sugge
   const [attribution, setAttribution] = useState(() => initialParam('attribution', ''));
   const [chip, setChip] = useState<ChipLabel>('UPDATE');
   const [statValue, setStatValue] = useState(() => initialParam('stat', ''));
+  const [postHandle, setPostHandle] = useState(() => initialParam('posthandle', ''));
+  const [postMeta, setPostMeta] = useState(() => initialParam('postmeta', ''));
+  const [refImage, setRefImage] = useState('');
+  const [refError, setRefError] = useState('');
+  const [refLoading, setRefLoading] = useState(false);
   const [footer, setFooter] = useState(() => initialParam('footer', ''));
   const [handle, setHandle] = useState(defaultHandle);
   const [accent, setAccent] = useState('#f3c457');
@@ -102,13 +116,15 @@ export default function CardDesigner({ suggestedHeadline, suggestedSource, sugge
         attribution,
         chip,
         statValue,
+        postHandle,
+        postMeta,
         footer,
         handle,
         accent,
         dim,
       });
     }
-  }, [accent, attribution, chip, dim, fontsReady, footer, format, handle, headline, highlight, logo, photo, statValue, template]);
+  }, [accent, attribution, chip, dim, fontsReady, footer, format, handle, headline, highlight, logo, photo, postHandle, postMeta, statValue, template]);
 
   function handlePhotoUpload(files: FileList | null) {
     const file = files?.[0];
@@ -227,6 +243,8 @@ export default function CardDesigner({ suggestedHeadline, suggestedSource, sugge
         attribution,
         chip,
         statValue,
+        postHandle,
+        postMeta,
         footer,
         handle,
         accent,
@@ -234,6 +252,36 @@ export default function CardDesigner({ suggestedHeadline, suggestedSource, sugge
       });
       scratch.toBlob((blob) => resolve(blob), 'image/png');
     });
+  }
+
+  async function previewArticleImage() {
+    if (!suggestedLink || refLoading) {
+      return;
+    }
+
+    setRefLoading(true);
+    setRefError('');
+    setRefImage('');
+
+    try {
+      const response = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(suggestedLink)}`);
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      const html = await response.text();
+      const parsed = new DOMParser().parseFromString(html, 'text/html');
+      const image = parsed
+        .querySelector('meta[property="og:image"], meta[name="og:image"], meta[name="twitter:image"], meta[property="twitter:image"]')
+        ?.getAttribute('content');
+      if (image) {
+        setRefImage(image);
+      } else {
+        setRefError('No preview image found in that article.');
+      }
+    } catch {
+      setRefError('Could not fetch the article — the site may block proxies.');
+    }
+    setRefLoading(false);
   }
 
   function triggerDownload(blob: Blob, suffix: string) {
@@ -392,6 +440,23 @@ export default function CardDesigner({ suggestedHeadline, suggestedSource, sugge
             <p className="designer-note">No photo yet — a placeholder background is shown.</p>
           )}
 
+          {suggestedLink ? (
+            <>
+              <button type="button" className="secondary" onClick={() => void previewArticleImage()} disabled={refLoading}>
+                {refLoading ? 'Fetching…' : "👁 Preview the article's own photo (reference only)"}
+              </button>
+              {refError ? <p className="designer-note danger-note">{refError}</p> : null}
+              {refImage ? (
+                <div className="ref-preview">
+                  <img src={refImage} alt="Article preview — reference only" />
+                  <p className="designer-note danger-note">
+                    Reference only — this is the outlet's copyrighted photo. Do not put it on a card. Use it to decide what to search for above.
+                  </p>
+                </div>
+              ) : null}
+            </>
+          ) : null}
+
           <label>
             <span>Photo darkness — {Math.round(dim * 100)}% (darker suits somber stories)</span>
             <input
@@ -421,6 +486,28 @@ export default function CardDesigner({ suggestedHeadline, suggestedSource, sugge
               <span>Who said it (name, title)</span>
               <input value={attribution} onChange={(event) => setAttribution(event.target.value)} placeholder="e.g. Ghana High Commissioner to South Africa" />
             </label>
+          ) : null}
+
+          {template === 'post' ? (
+            <>
+              <div className="field-grid">
+                <label>
+                  <span>Name (as shown on the post)</span>
+                  <input value={attribution} onChange={(event) => setAttribution(event.target.value)} placeholder="e.g. Ministry of Information" />
+                </label>
+                <label>
+                  <span>Handle / page name</span>
+                  <input value={postHandle} onChange={(event) => setPostHandle(event.target.value)} placeholder="e.g. @moinfoghana" />
+                </label>
+              </div>
+              <label>
+                <span>Meta line (time · date · platform)</span>
+                <input value={postMeta} onChange={(event) => setPostMeta(event.target.value)} placeholder="e.g. 6:41 PM · 5 Jul 2026 · X" />
+              </label>
+              <p className="designer-note">
+                This renders our own styled graphic of the statement — always quote their exact words and keep the source line filled in.
+              </p>
+            </>
           ) : null}
 
           {template === 'update' ? (

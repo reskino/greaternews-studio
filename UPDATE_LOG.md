@@ -1,5 +1,10 @@
 # Update Log
 
+## 1.4.0 - 2026-07-05
+- New "Social post" card template: renders a statement as a social-style post graphic — avatar initials, name, handle, the exact words, and a time/date/platform meta line. The legal alternative to screenshotting or re-uploading other pages' posts.
+- Added "Preview the article's own photo (reference only)": fetches the selected story's article image for editorial reference inside the studio, clearly marked as the outlet's copyright and never loaded onto a card.
+- Both verified in-browser; deployed to GitHub Pages.
+
 ## 1.3.0 - 2026-07-05
 - Rebuilt "Find images for the selected story" after it returned irrelevant results. It now: extracts the people/places/organizations from the headline (instead of mashing all words into one query), pulls each entity's Wikipedia lead image (the canonical photo, license-verified against Commons so fair-use files are excluded), searches Commons and Openverse per entity, and ranks results by relevance.
 - Added a Ghana acronym dictionary (BoG → Bank of Ghana, GFA, ECG, COCOBOD, NPP/NDC, etc.) so abbreviations resolve to the right entity — "BoG" previously matched "Bog", the swamp.

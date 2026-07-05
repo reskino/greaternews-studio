@@ -6,7 +6,7 @@ import { downloadText, formatDateTime } from './text';
 import type { CommandMode, LiveFeedState, PostedLogEntry, StoryCategory, StoryDraft, StoryStatus } from './types';
 import { usePostedLog } from './usePostedLog';
 
-const APP_VERSION = '1.3.0';
+const APP_VERSION = '1.4.0';
 const today = new Date().toISOString().slice(0, 10);
 
 const commandModes: Array<{ value: CommandMode; label: string }> = [
@@ -419,6 +419,7 @@ export default function App() {
           suggestedHeadline={draft.headline}
           suggestedSource={draft.primarySource}
           suggestedCategory={draft.category}
+          suggestedLink={draft.link ?? ''}
           weeklyHeadlines={weeklyHeadlines}
           weeklyRange={weeklyRange}
         />
