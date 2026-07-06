@@ -340,6 +340,22 @@ export default function CardDesigner({
     setVideoProgress(-1);
   }
 
+  async function shareCard() {
+    const blob = await renderToBlob(format);
+    if (!blob) {
+      return;
+    }
+
+    const file = new File([blob], `greaternews_${template}.png`, { type: 'image/png' });
+    if (navigator.canShare?.({ files: [file] })) {
+      try {
+        await navigator.share({ files: [file], title: headline });
+      } catch {
+        // User dismissed the share sheet.
+      }
+    }
+  }
+
   function copyCardToClipboard() {
     canvasRef.current?.toBlob(async (blob) => {
       if (!blob) {
@@ -629,6 +645,11 @@ export default function CardDesigner({
             <button type="button" className="secondary" onClick={copyCardToClipboard}>
               {copied ? 'Copied ✓' : 'Copy image'}
             </button>
+            {typeof navigator !== 'undefined' && 'canShare' in navigator ? (
+              <button type="button" className="secondary" onClick={() => void shareCard()}>
+                Share card
+              </button>
+            ) : null}
             <button type="button" className="secondary" onClick={() => void downloadAllSizes()}>
               Download all sizes
             </button>

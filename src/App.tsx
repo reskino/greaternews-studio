@@ -2,12 +2,12 @@ import { useEffect, useMemo, useState } from 'react';
 import { fetchArticleExcerpt } from './article';
 import CardDesigner from './CardDesigner';
 import { fetchAllFeeds, feedSources, isAlreadyPosted, selectMenuStories, storyBuckets, storyTemplates } from './feeds';
-import { buildClaudeBrief, buildDailyPack, buildOutputs, buildPostedLogFile } from './outputs';
+import { buildClaudeBrief, buildDailyPack, buildOutputs, buildPostedLogFile, parsePackFields } from './outputs';
 import { clampText, downloadText, formatDateTime } from './text';
 import type { CommandMode, LiveFeedState, PostedLogEntry, StoryCategory, StoryDraft, StoryStatus } from './types';
 import { usePostedLog } from './usePostedLog';
 
-const APP_VERSION = '1.7.0';
+const APP_VERSION = '1.8.0';
 const today = new Date().toISOString().slice(0, 10);
 
 const commandModes: Array<{ value: CommandMode; label: string }> = [
@@ -74,6 +74,26 @@ function CopyButton({ text, label = 'Copy' }: { text: string; label?: string }) 
   return (
     <button type="button" className="secondary copy-button" onClick={() => void handleCopy()}>
       {copied ? 'Copied ✓' : label}
+    </button>
+  );
+}
+
+function ShareButton({ text, title }: { text: string; title: string }) {
+  if (typeof navigator === 'undefined' || !navigator.share) {
+    return null;
+  }
+
+  return (
+    <button
+      type="button"
+      className="secondary copy-button"
+      onClick={() => {
+        navigator.share({ title, text }).catch(() => {
+          // User dismissed the share sheet.
+        });
+      }}
+    >
+      Share
     </button>
   );
 }
@@ -204,6 +224,24 @@ export default function App() {
   const quoteWords = wordCount(draft.quote);
   const headlineWords = wordCount(draft.headline);
 
+  const [pasteMessage, setPasteMessage] = useState('');
+
+  async function pasteClaudePack() {
+    try {
+      const text = await navigator.clipboard.readText();
+      const fields = parsePackFields(text);
+      if (fields) {
+        setDraft((current) => ({ ...current, ...fields }));
+        setPasteMessage(`Imported ${Object.keys(fields).length} fields from Claude's pack.`);
+      } else {
+        setPasteMessage("No ===FIELDS=== block found — copy Claude's full reply first.");
+      }
+    } catch {
+      setPasteMessage('Clipboard read was blocked — allow clipboard access and try again.');
+    }
+    window.setTimeout(() => setPasteMessage(''), 4000);
+  }
+
   function handleImportFile(files: FileList | null) {
     const file = files?.[0];
     if (!file) {
@@ -319,6 +357,9 @@ export default function App() {
             <button type="button" className="secondary copy-button" onClick={() => void copyBriefWithContext()} disabled={briefState === 'busy'}>
               {briefState === 'busy' ? 'Fetching article context…' : briefState === 'copied' ? 'Copied ✓' : 'Copy Claude brief'}
             </button>
+            <button type="button" className="secondary copy-button" onClick={() => void pasteClaudePack()}>
+              Paste Claude pack
+            </button>
             <button type="button" className="secondary" onClick={() => setDraft(cloneDraft(storyTemplates[0]))}>
               Reset draft
             </button>
@@ -326,8 +367,9 @@ export default function App() {
         </div>
 
         <p className="feed-status">
-          Fast AI drafting: hit "Copy Claude brief" (it grabs the article's opening paragraphs as context when it can), paste it into Claude, and it verifies the story and writes the whole pack in the house style.
+          Fast AI drafting: "Copy Claude brief" packages the story with article context → paste into Claude → copy Claude's reply → "Paste Claude pack" fills every field here automatically.
         </p>
+        {pasteMessage ? <p className="feed-status">{pasteMessage}</p> : null}
 
         <details className="rules-details">
           <summary>Editorial guardrails — read before publishing</summary>
@@ -445,7 +487,7 @@ export default function App() {
           <article className="output-card">
             <div className="output-heading">
               <p className="eyebrow">Facebook</p>
-              <CopyButton text={outputs.facebook} />
+              <span className="output-actions"><ShareButton text={outputs.facebook} title={draft.headline} /><CopyButton text={outputs.facebook} /></span>
             </div>
             <pre>{outputs.facebook}</pre>
           </article>
@@ -455,6 +497,7 @@ export default function App() {
               <p className="eyebrow">X</p>
               <div className="output-actions">
                 <span className={outputs.x.length > 280 ? 'pill danger' : 'pill'}>{outputs.x.length}/280</span>
+                <ShareButton text={outputs.x} title={draft.headline} />
                 <CopyButton text={outputs.x} />
               </div>
             </div>
@@ -464,7 +507,7 @@ export default function App() {
           <article className="output-card">
             <div className="output-heading">
               <p className="eyebrow">Instagram</p>
-              <CopyButton text={outputs.instagram} />
+              <span className="output-actions"><ShareButton text={outputs.instagram} title={draft.headline} /><CopyButton text={outputs.instagram} /></span>
             </div>
             <pre>{outputs.instagram}</pre>
           </article>
@@ -472,7 +515,7 @@ export default function App() {
           <article className="output-card">
             <div className="output-heading">
               <p className="eyebrow">WhatsApp</p>
-              <CopyButton text={outputs.whatsapp} />
+              <span className="output-actions"><ShareButton text={outputs.whatsapp} title={draft.headline} /><CopyButton text={outputs.whatsapp} /></span>
             </div>
             <pre>{outputs.whatsapp}</pre>
           </article>

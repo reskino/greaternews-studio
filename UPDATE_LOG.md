@@ -1,5 +1,10 @@
 # Update Log
 
+## 1.8.0 - 2026-07-06
+- Test suite (vitest, 26 tests): locks in the X 280-char limit, DEVELOPING prefixes, hashtag caps, brand hashtags, entity extraction with the Ghana acronym dictionary, entity dedupe, HTML-entity decoding (including double-encoded feeds), and the new pack parser. Run with `npm test`.
+- One-tap sharing: on phones, every text output has a Share button (native share sheet) and the Card Studio has "Share card" which shares the rendered PNG directly into Facebook/WhatsApp/X — no download-reupload dance.
+- Complete Claude round-trip: the brief now asks Claude to end with a ===FIELDS=== block, and the new "Paste Claude pack" button reads the clipboard and fills every draft field from it in one click.
+
 ## 1.7.0 - 2026-07-06
 - Card layout upgrade for Headline and Update templates: optional subline (one sentence of context under the headline), vertical centering of the text group, and grow-to-fit — short headlines scale up to 24% larger (capped at two lines) so cards never look half-empty.
 - "Use selected story" now fills the subline from the story's key facts; the automated cards_DATE.json spec supports subline too.

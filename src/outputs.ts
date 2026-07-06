@@ -125,9 +125,66 @@ export function buildClaudeBrief(draft: StoryDraft, articleExcerpt = '') {
     '6. NEWS CARD TEXT: headline max 9 words, highlight phrase (2-4 words to color — skip for tragedy), subline, source strip.',
     '',
     'End with the list of sources you verified against, with URLs.',
+    '',
+    'Then finish with this machine block so the studio can import your work (plain text, exact labels, one per line):',
+    '===FIELDS===',
+    'HEADLINE: <the verified story headline>',
+    'KEYFACTS: <the 2-4 verified facts in 2-3 sentences>',
+    'ANGLE: <our angle in one sentence>',
+    'QUOTE: <one attributed quote under 15 words, or leave empty>',
+    'CTA: <the engagement question>',
+    'IMAGE: <image suggestion for the design team>',
+    'SOURCES: <comma-separated outlets you verified against>',
+    'STATUS: <READY or DEVELOPING>',
+    '===END===',
   ]
     .filter(Boolean)
     .join('\n');
+}
+
+const fieldMap: Record<string, keyof StoryDraft> = {
+  HEADLINE: 'headline',
+  KEYFACTS: 'keyFacts',
+  ANGLE: 'angle',
+  QUOTE: 'quote',
+  CTA: 'cta',
+  IMAGE: 'imageSuggestion',
+  SOURCES: 'sourcesSearched',
+  STATUS: 'status',
+};
+
+// Parses the ===FIELDS=== block Claude appends to a pack reply back into draft fields.
+export function parsePackFields(text: string): Partial<StoryDraft> | null {
+  const match = text.match(/===FIELDS===([\s\S]*?)===END===/);
+  if (!match) {
+    return null;
+  }
+
+  const result: Partial<StoryDraft> = {};
+  let currentField: keyof StoryDraft | null = null;
+
+  for (const rawLine of match[1].split('\n')) {
+    const line = rawLine.trim();
+    const labelMatch = line.match(/^([A-Z]+):\s*(.*)$/);
+
+    if (labelMatch && fieldMap[labelMatch[1]]) {
+      currentField = fieldMap[labelMatch[1]];
+      const value = labelMatch[2].trim();
+      if (currentField === 'status') {
+        if (value === 'READY' || value === 'DEVELOPING') {
+          result.status = value;
+        }
+        currentField = null;
+      } else if (value) {
+        (result as Record<string, string>)[currentField] = value;
+      }
+    } else if (currentField && line) {
+      // Continuation line of a multi-line value (status never reaches here — it resets currentField above).
+      (result as Record<string, string>)[currentField] = `${(result as Record<string, string>)[currentField] ?? ''} ${line}`.trim();
+    }
+  }
+
+  return Object.keys(result).length > 0 ? result : null;
 }
 
 export function buildOutputs(draft: StoryDraft) {
