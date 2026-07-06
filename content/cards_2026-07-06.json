@@ -1,0 +1,57 @@
+{
+  "date": "2026-07-06",
+  "cards": [
+    {
+      "slug": "black-stars-exit",
+      "template": "headline",
+      "headline": "Black Stars Bow Out With Heads Held High",
+      "highlight": "Heads Held High",
+      "footer": "Source: ESPN / FIFA",
+      "dim": 0.3,
+      "formats": ["portrait", "story"],
+      "video": true
+    },
+    {
+      "slug": "khamenei-funeral",
+      "template": "headline",
+      "headline": "Iran Begins Its Biggest State Funeral In History",
+      "highlight": "",
+      "footer": "Source: CBS News",
+      "dim": 0.6,
+      "formats": ["portrait"],
+      "video": false
+    },
+    {
+      "slug": "pay-talks-freeze",
+      "template": "quote",
+      "headline": "2026 is not a year for major public sector salary renegotiations",
+      "attribution": "Jane Naana Opoku-Agyemang, Vice President",
+      "footer": "Source: The Herald / NewsGhana",
+      "dim": 0.5,
+      "formats": ["portrait"],
+      "video": false
+    },
+    {
+      "slug": "cedi-h2-check",
+      "template": "stat",
+      "statValue": "GH¢12.30",
+      "headline": "to the dollar on the forex market this week — up 3.7% on the month, down 9.9% on the year",
+      "footer": "Source: Modern Ghana / TradingEconomics",
+      "dim": 0.5,
+      "formats": ["portrait"],
+      "video": true
+    },
+    {
+      "slug": "isak-case-update",
+      "template": "update",
+      "chip": "UPDATE",
+      "headline": "SA Disputes Xenophobia Label In Isak Case",
+      "highlight": "",
+      "footer": "Photo: Kransky · CC BY 3.0 · Wikimedia Commons",
+      "photoUrl": "https://upload.wikimedia.org/wikipedia/commons/f/f8/Ghanan_High_Commission_in_Pretoria.JPG",
+      "dim": 0.55,
+      "formats": ["portrait"],
+      "video": false
+    }
+  ]
+}

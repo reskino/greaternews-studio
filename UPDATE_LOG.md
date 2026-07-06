@@ -1,5 +1,11 @@
 # Update Log
 
+## 1.6.0 - 2026-07-06
+- Full auto-render pipeline: the morning run now also writes a card spec (cards_DATE.json) and scripts/render_assets.py turns it into finished assets — card PNGs in every requested size plus 7-second MP4 videos — saved to content/DATE/assets/ with zero clicks. Verified end-to-end: 8 files, 0 failures from today's real stories.
+- New render.html + renderRunner.ts: a headless batch-renderer page built into the app (drives the same card engine and video recorder as the Studio).
+- Safety default: automated renders use a photo only when the spec provides a rights-verified photoUrl; otherwise the clean placeholder background — no unsupervised image picking.
+- morning-run.cmd now chains: verify news → write pack → write card spec → render all assets.
+
 ## 1.5.0 - 2026-07-06
 - Video export in the Card Studio: "🎬 Export video (7s)" renders the current card as a cinematic reveal (fade-in, settle zoom, gold accent sweep, locks onto the exact card) and records it in-browser via MediaRecorder — MP4 where the browser supports it (verified on Edge/Windows), WebM elsewhere. Works for all six templates and all three sizes. No external services or credits.
 - Fixed a progress-clamp bug where animation time could start negative on the first frame.

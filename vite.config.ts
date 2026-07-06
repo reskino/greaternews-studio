@@ -5,4 +5,12 @@ export default defineConfig({
   // Relative asset paths so the build works at any URL (GitHub Pages subpath, local file, root domain).
   base: './',
   plugins: [react()],
+  build: {
+    rollupOptions: {
+      input: {
+        main: 'index.html',
+        render: 'render.html',
+      },
+    },
+  },
 });
