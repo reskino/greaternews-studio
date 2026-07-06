@@ -3,6 +3,7 @@ import type { CardFormat, CardTemplate, ChipLabel } from './cardEngine';
 import { drawCard, formatSizes, templateMeta } from './cardEngine';
 import type { ImageResult } from './imageSearch';
 import { dedupeResults, findStoryImages, loadImage, loadImageWithProxyFallback, searchCommons, searchOpenverse } from './imageSearch';
+import { exportCardVideo, videoExportSupported } from './videoExport';
 
 type CardDesignerProps = {
   suggestedHeadline: string;
@@ -59,6 +60,7 @@ export default function CardDesigner({
   const [refImage, setRefImage] = useState('');
   const [refError, setRefError] = useState('');
   const [refLoading, setRefLoading] = useState(false);
+  const [videoProgress, setVideoProgress] = useState(-1);
   const [footer, setFooter] = useState(() => initialParam('footer', ''));
   const [handle, setHandle] = useState(defaultHandle);
   const [accent, setAccent] = useState('#f3c457');
@@ -307,6 +309,29 @@ export default function CardDesigner({
         triggerDownload(blob, formatSizes[key].suffix);
       }
     }
+  }
+
+  async function downloadVideo() {
+    if (videoProgress >= 0) {
+      return;
+    }
+
+    setVideoProgress(0);
+    try {
+      const { blob, extension } = await exportCardVideo(
+        { template, format, photo, logo, headline, highlight, attribution, chip, statValue, postHandle, postMeta, footer, handle, accent, dim },
+        (progress) => setVideoProgress(progress),
+      );
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = `greaternews_${template}_${new Date().toISOString().slice(0, 10)}_${formatSizes[format].suffix}.${extension}`;
+      anchor.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      // Unsupported browser — the button is hidden in that case, so this is a rare race.
+    }
+    setVideoProgress(-1);
   }
 
   function copyCardToClipboard() {
@@ -595,6 +620,11 @@ export default function CardDesigner({
             <button type="button" className="secondary" onClick={() => void downloadAllSizes()}>
               Download all sizes
             </button>
+            {videoExportSupported() ? (
+              <button type="button" className="secondary" onClick={() => void downloadVideo()} disabled={videoProgress >= 0}>
+                {videoProgress >= 0 ? `Rendering video… ${Math.round(videoProgress * 100)}%` : '🎬 Export video (7s)'}
+              </button>
+            ) : null}
             <button type="button" className="primary" onClick={() => void downloadCard()}>
               Download PNG
             </button>

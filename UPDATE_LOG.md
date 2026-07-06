@@ -1,5 +1,10 @@
 # Update Log
 
+## 1.5.0 - 2026-07-06
+- Video export in the Card Studio: "🎬 Export video (7s)" renders the current card as a cinematic reveal (fade-in, settle zoom, gold accent sweep, locks onto the exact card) and records it in-browser via MediaRecorder — MP4 where the browser supports it (verified on Edge/Windows), WebM elsewhere. Works for all six templates and all three sizes. No external services or credits.
+- Fixed a progress-clamp bug where animation time could start negative on the first frame.
+- Morning run delivered content/greaternews_2026-07-06.md: five verified packs (Black Stars World Cup exit, Khamenei funeral, public-sector pay freeze, cedi H2 check, SA case UPDATE) plus DEVELOPING watchlist.
+
 ## 1.4.0 - 2026-07-05
 - New "Social post" card template: renders a statement as a social-style post graphic — avatar initials, name, handle, the exact words, and a time/date/platform meta line. The legal alternative to screenshotting or re-uploading other pages' posts.
 - Added "Preview the article's own photo (reference only)": fetches the selected story's article image for editorial reference inside the studio, clearly marked as the outlet's copyright and never loaded onto a card.
