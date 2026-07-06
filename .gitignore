@@ -2,3 +2,4 @@ node_modules/
 dist/
 greaternews-studio-site.zip
 content/*/assets/
+secrets.json

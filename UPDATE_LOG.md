@@ -1,5 +1,11 @@
 # Update Log
 
+## 1.8.1 - 2026-07-06
+- Scheduled auto-publishing engine (scripts/publish.py): posts the day's queue to Facebook (Graph API, photo + text) and X (API v2 with OAuth 1.0a signing and media upload). Runs in dry-run until secrets.json exists; failures stay pending with the error recorded and retry at the next slot.
+- Morning run now also writes content/queue_DATE.json (facebook + x posts for the top 3 stories, strongest first) and logs the queue status.
+- PUBLISHING_SETUP.md: step-by-step token setup for the Facebook Page and X free tier, plus the four schtasks commands that spread posting across Ghana's peak hours (07:33 / 12:27 / 18:11 / 20:41, one item per slot).
+- Verified with today's real queue in dry-run: 4 items, images resolved, no-secrets fallback works.
+
 ## 1.8.0 - 2026-07-06
 - Test suite (vitest, 26 tests): locks in the X 280-char limit, DEVELOPING prefixes, hashtag caps, brand hashtags, entity extraction with the Ghana acronym dictionary, entity dedupe, HTML-entity decoding (including double-encoded feeds), and the new pack parser. Run with `npm test`.
 - One-tap sharing: on phones, every text output has a Share button (native share sheet) and the Card Studio has "Share card" which shares the rendered PNG directly into Facebook/WhatsApp/X — no download-reupload dance.
