@@ -97,7 +97,7 @@ export function buildNewsCard(draft: StoryDraft) {
   ].join('\n');
 }
 
-export function buildClaudeBrief(draft: StoryDraft) {
+export function buildClaudeBrief(draft: StoryDraft, articleExcerpt = '') {
   return [
     'You are the content engine for GreaterNews, a Ghana-first news channel. Tagline: "News You Can Trust." Follow these rules strictly:',
     '- Search the web FIRST and verify with at least 2 independent, current sources — never write news from memory.',
@@ -112,6 +112,9 @@ export function buildClaudeBrief(draft: StoryDraft) {
     `- Lead source: ${draft.primarySource}`,
     draft.link ? `- Link: ${draft.link}` : '',
     `- Feed summary: ${clampText(draft.menuNote, 300)}`,
+    ...(articleExcerpt
+      ? ['', 'ARTICLE EXCERPT (from the lead source — reference only, verify every fact independently):', articleExcerpt]
+      : []),
     '',
     'TASK — verify the story now, then produce the full GreaterNews pack:',
     '1. FACEBOOK: hook headline in caps, 3-6 short sentences, source attribution line, 3-5 hashtags including #GreaterNews #Ghana, end with an engagement question.',

@@ -696,6 +696,20 @@ pre {
     color: var(--danger);
 }
 
+.field-hint {
+    font-size: 0.78rem;
+    font-style: normal;
+    color: var(--muted);
+}
+
+.field-hint.warn {
+    color: var(--danger);
+}
+
+.angle-chips {
+    margin-top: 2px;
+}
+
 .designer-actions {
     display: flex;
     flex-wrap: wrap;

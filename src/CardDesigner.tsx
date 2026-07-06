@@ -7,6 +7,7 @@ import { exportCardVideo, videoExportSupported } from './videoExport';
 
 type CardDesignerProps = {
   suggestedHeadline: string;
+  suggestedSubline: string;
   suggestedSource: string;
   suggestedCategory: string;
   suggestedLink: string;
@@ -41,6 +42,7 @@ function initialTemplate(): CardTemplate {
 
 export default function CardDesigner({
   suggestedHeadline,
+  suggestedSubline,
   suggestedSource,
   suggestedCategory,
   suggestedLink,
@@ -51,6 +53,7 @@ export default function CardDesigner({
   const photoUrlRef = useRef<string>('');
   const [template, setTemplate] = useState<CardTemplate>(initialTemplate);
   const [headline, setHeadline] = useState(() => initialParam('headline', suggestedHeadline));
+  const [subline, setSubline] = useState(() => initialParam('subline', ''));
   const [highlight, setHighlight] = useState(() => initialParam('highlight', ''));
   const [attribution, setAttribution] = useState(() => initialParam('attribution', ''));
   const [chip, setChip] = useState<ChipLabel>('UPDATE');
@@ -114,6 +117,7 @@ export default function CardDesigner({
         photo,
         logo,
         headline,
+        subline,
         highlight,
         attribution,
         chip,
@@ -126,7 +130,7 @@ export default function CardDesigner({
         dim,
       });
     }
-  }, [accent, attribution, chip, dim, fontsReady, footer, format, handle, headline, highlight, logo, photo, postHandle, postMeta, statValue, template]);
+  }, [accent, attribution, chip, dim, fontsReady, footer, format, handle, headline, highlight, logo, photo, postHandle, postMeta, statValue, subline, template]);
 
   function handlePhotoUpload(files: FileList | null) {
     const file = files?.[0];
@@ -227,6 +231,7 @@ export default function CardDesigner({
 
   function useSelectedStory() {
     setHeadline(suggestedHeadline);
+    setSubline(suggestedSubline);
     if (!footer.trim()) {
       setFooter(`(Source: ${suggestedSource})`);
     }
@@ -241,6 +246,7 @@ export default function CardDesigner({
         photo,
         logo,
         headline,
+        subline,
         highlight,
         attribution,
         chip,
@@ -319,7 +325,7 @@ export default function CardDesigner({
     setVideoProgress(0);
     try {
       const { blob, extension } = await exportCardVideo(
-        { template, format, photo, logo, headline, highlight, attribution, chip, statValue, postHandle, postMeta, footer, handle, accent, dim },
+        { template, format, photo, logo, headline, subline, highlight, attribution, chip, statValue, postHandle, postMeta, footer, handle, accent, dim },
         (progress) => setVideoProgress(progress),
       );
       const url = URL.createObjectURL(blob);
@@ -500,10 +506,16 @@ export default function CardDesigner({
           </label>
 
           {template === 'headline' || template === 'update' ? (
-            <label>
-              <span>Highlight phrase (colored words inside the headline — skip for tragedy)</span>
-              <input value={highlight} onChange={(event) => setHighlight(event.target.value)} placeholder="e.g. End American Financial Aid" />
-            </label>
+            <>
+              <label>
+                <span>Subline (optional — one sentence of context under the headline)</span>
+                <input value={subline} onChange={(event) => setSubline(event.target.value)} placeholder="e.g. Colombia 1-0 Ghana in the round of 32 — after a run that included holding England" />
+              </label>
+              <label>
+                <span>Highlight phrase (colored words inside the headline — skip for tragedy)</span>
+                <input value={highlight} onChange={(event) => setHighlight(event.target.value)} placeholder="e.g. End American Financial Aid" />
+              </label>
+            </>
           ) : null}
 
           {template === 'quote' ? (

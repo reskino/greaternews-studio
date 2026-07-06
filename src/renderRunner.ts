@@ -12,6 +12,7 @@ type CardSpec = {
   slug: string;
   template?: CardTemplate;
   headline?: string;
+  subline?: string;
   highlight?: string;
   attribution?: string;
   chip?: ChipLabel;
@@ -96,6 +97,7 @@ async function run() {
         photo,
         logo,
         headline: card.headline ?? '',
+        subline: card.subline ?? '',
         highlight: card.highlight ?? '',
         attribution: card.attribution ?? '',
         chip: card.chip ?? 'UPDATE',

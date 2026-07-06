@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
+import { fetchArticleExcerpt } from './article';
 import CardDesigner from './CardDesigner';
 import { fetchAllFeeds, feedSources, isAlreadyPosted, selectMenuStories, storyBuckets, storyTemplates } from './feeds';
 import { buildClaudeBrief, buildDailyPack, buildOutputs, buildPostedLogFile } from './outputs';
-import { downloadText, formatDateTime } from './text';
+import { clampText, downloadText, formatDateTime } from './text';
 import type { CommandMode, LiveFeedState, PostedLogEntry, StoryCategory, StoryDraft, StoryStatus } from './types';
 import { usePostedLog } from './usePostedLog';
 
-const APP_VERSION = '1.6.0';
+const APP_VERSION = '1.7.0';
 const today = new Date().toISOString().slice(0, 10);
 
 const commandModes: Array<{ value: CommandMode; label: string }> = [
@@ -19,6 +20,43 @@ const commandModes: Array<{ value: CommandMode; label: string }> = [
 function cloneDraft(draft: StoryDraft): StoryDraft {
   return { ...draft };
 }
+
+function wordCount(value: string) {
+  return value.trim().split(/\s+/).filter(Boolean).length;
+}
+
+const angleIdeas: Record<StoryCategory, string[]> = {
+  'Ghana politics & governance': [
+    'What this means for ordinary Ghanaians, in plain terms.',
+    'What happens next — the process and the timeline from here.',
+    'Who wins, who loses, and why it matters beyond politics.',
+  ],
+  'Ghana business & economy': [
+    'What this does to prices in your pocket this month.',
+    'What it means for businesses, jobs, and the market.',
+    'The trend behind the number — better or worse than last quarter?',
+  ],
+  Sports: [
+    'What this result means for what comes next.',
+    'The standout performance behind the scoreline.',
+    'What must change before the next fixture.',
+  ],
+  'Entertainment & culture': [
+    'Why this moment matters for Ghanaian culture.',
+    'The story behind the announcement.',
+    'What fans should watch for next.',
+  ],
+  'World news': [
+    'Why this matters to Ghana and Africa.',
+    'What changes now on the global stage.',
+    'The context behind the headline in two sentences.',
+  ],
+  'Tech / trending': [
+    'What this means for users in Ghana.',
+    'Why now — the shift behind the launch.',
+    'Who gains from this change, and who should be careful.',
+  ],
+};
 
 function CopyButton({ text, label = 'Copy' }: { text: string; label?: string }) {
   const [copied, setCopied] = useState(false);
@@ -137,6 +175,35 @@ export default function App() {
     downloadText(`greaternews_log_backup_${date}.json`, JSON.stringify(postedLog, null, 2));
   }
 
+  const [briefState, setBriefState] = useState<'idle' | 'busy' | 'copied'>('idle');
+
+  async function copyBriefWithContext() {
+    if (briefState === 'busy') {
+      return;
+    }
+
+    setBriefState('busy');
+    let excerpt = '';
+    if (draft.link) {
+      try {
+        excerpt = await fetchArticleExcerpt(draft.link);
+      } catch {
+        // Article not reachable — the brief still works from the feed summary.
+      }
+    }
+
+    try {
+      await navigator.clipboard.writeText(buildClaudeBrief(draft, excerpt));
+      setBriefState('copied');
+      window.setTimeout(() => setBriefState('idle'), 1600);
+    } catch {
+      setBriefState('idle');
+    }
+  }
+
+  const quoteWords = wordCount(draft.quote);
+  const headlineWords = wordCount(draft.headline);
+
   function handleImportFile(files: FileList | null) {
     const file = files?.[0];
     if (!file) {
@@ -249,7 +316,9 @@ export default function App() {
             <h2>Make the story ours</h2>
           </div>
           <div className="menu-actions">
-            <CopyButton text={buildClaudeBrief(draft)} label="Copy Claude brief" />
+            <button type="button" className="secondary copy-button" onClick={() => void copyBriefWithContext()} disabled={briefState === 'busy'}>
+              {briefState === 'busy' ? 'Fetching article context…' : briefState === 'copied' ? 'Copied ✓' : 'Copy Claude brief'}
+            </button>
             <button type="button" className="secondary" onClick={() => setDraft(cloneDraft(storyTemplates[0]))}>
               Reset draft
             </button>
@@ -257,7 +326,7 @@ export default function App() {
         </div>
 
         <p className="feed-status">
-          Fast AI drafting: hit "Copy Claude brief", paste it into Claude, and it verifies the story and writes the whole pack in the house style — then paste the results back here.
+          Fast AI drafting: hit "Copy Claude brief" (it grabs the article's opening paragraphs as context when it can), paste it into Claude, and it verifies the story and writes the whole pack in the house style.
         </p>
 
         <details className="rules-details">
@@ -283,6 +352,9 @@ export default function App() {
           <label className="span-full">
             <span>Headline</span>
             <input value={draft.headline} onChange={(event) => updateDraft('headline', event.target.value)} />
+            {headlineWords > 9 ? (
+              <em className="field-hint">ℹ {headlineWords} words — fine for posts; the card headline rule is max 9, so shorten it in the Card Studio.</em>
+            ) : null}
           </label>
 
           <label>
@@ -327,11 +399,21 @@ export default function App() {
           <label>
             <span>Our angle</span>
             <textarea value={draft.angle} onChange={(event) => updateDraft('angle', event.target.value)} rows={3} />
+            <span className="bucket-chips angle-chips">
+              {angleIdeas[draft.category].map((idea) => (
+                <button key={idea} type="button" className="bucket-chip query-chip" onClick={() => updateDraft('angle', idea)}>
+                  {idea.split(' ').slice(0, 5).join(' ')}…
+                </button>
+              ))}
+            </span>
           </label>
 
           <label>
             <span>Short quote (under 15 words)</span>
             <input value={draft.quote} onChange={(event) => updateDraft('quote', event.target.value)} />
+            {quoteWords > 15 ? (
+              <em className="field-hint warn">⚠ {quoteWords} words — house rule: direct quotes stay under 15. Trim it or paraphrase with attribution.</em>
+            ) : null}
           </label>
 
           <label>
@@ -417,6 +499,7 @@ export default function App() {
         <p className="eyebrow step-eyebrow">Step 4 — Card Studio</p>
         <CardDesigner
           suggestedHeadline={draft.headline}
+          suggestedSubline={clampText(draft.keyFacts, 120)}
           suggestedSource={draft.primarySource}
           suggestedCategory={draft.category}
           suggestedLink={draft.link ?? ''}

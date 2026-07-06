@@ -8,6 +8,7 @@ export type CardOptions = {
   photo: HTMLImageElement | null;
   logo: HTMLImageElement | null;
   headline: string;
+  subline: string;
   highlight: string;
   attribution: string;
   chip: ChipLabel;
@@ -159,6 +160,128 @@ function drawWrappedBlock(
   });
 
   return options.top + lines.length * lineHeight;
+}
+
+type BlockLayout = {
+  lines: HeadlineWord[][];
+  fontSize: number;
+  lineHeight: number;
+  height: number;
+};
+
+function fitBlock(
+  ctx: CanvasRenderingContext2D,
+  words: HeadlineWord[],
+  options: { maxWidth: number; baseFontSize: number; minFontSize: number; maxLines: number; maxHeight: number; weight: number; lineHeightFactor?: number },
+): BlockLayout {
+  const factor = options.lineHeightFactor ?? 1.2;
+  let fontSize = options.baseFontSize;
+  let lines: HeadlineWord[][] = [];
+
+  while (fontSize >= options.minFontSize) {
+    ctx.font = `${options.weight} ${fontSize}px ${FONT_STACK}`;
+    lines = layoutLines(ctx, words, options.maxWidth);
+    if (lines.length <= options.maxLines && lines.length * fontSize * factor <= options.maxHeight) {
+      break;
+    }
+    fontSize -= 4;
+  }
+
+  return { lines, fontSize, lineHeight: fontSize * factor, height: lines.length * fontSize * factor };
+}
+
+function paintBlock(
+  ctx: CanvasRenderingContext2D,
+  layout: BlockLayout,
+  options: { width: number; top: number; weight: number; accent: string; color: string },
+) {
+  ctx.font = `${options.weight} ${layout.fontSize}px ${FONT_STACK}`;
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
+  const spaceWidth = ctx.measureText(' ').width;
+
+  layout.lines.forEach((line, lineIndex) => {
+    const lineWidth = line.reduce(
+      (total, word, wordIndex) => total + ctx.measureText(word.text).width + (wordIndex > 0 ? spaceWidth : 0),
+      0,
+    );
+    let x = (options.width - lineWidth) / 2;
+    const y = options.top + lineIndex * layout.lineHeight;
+
+    for (const word of line) {
+      ctx.fillStyle = word.highlighted ? options.accent : options.color;
+      ctx.fillText(word.text, x, y);
+      x += ctx.measureText(word.text).width + spaceWidth;
+    }
+  });
+
+  return options.top + layout.height;
+}
+
+// Headline plus optional subline, vertically centered in the available zone.
+// Short headlines get a capped size boost so the card never looks half-empty.
+function fitHeadlineGroup(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  options: CardOptions,
+  available: number,
+  baseFontSize: number,
+) {
+  const words = splitHeadlineWords(options.headline || 'Type the headline in the Card Studio', options.highlight);
+  const maxWidth = width * 0.88;
+  const storyFormat = options.format === 'story';
+
+  const boosted = fitBlock(ctx, words, {
+    maxWidth,
+    baseFontSize: Math.round(baseFontSize * 1.24),
+    minFontSize: baseFontSize,
+    maxLines: 2,
+    maxHeight: available,
+    weight: 800,
+  });
+
+  const headline =
+    boosted.fontSize > baseFontSize && boosted.lines.length <= 2
+      ? boosted
+      : fitBlock(ctx, words, {
+          maxWidth,
+          baseFontSize,
+          minFontSize: 34,
+          maxLines: storyFormat ? 6 : 4,
+          maxHeight: available,
+          weight: 800,
+        });
+
+  const gap = Math.round(height * 0.02);
+  let subline: BlockLayout | null = null;
+  if (options.subline.trim()) {
+    subline = fitBlock(ctx, splitHeadlineWords(options.subline, ''), {
+      maxWidth: width * 0.84,
+      baseFontSize: Math.round(width * 0.026),
+      minFontSize: Math.round(width * 0.02),
+      maxLines: 3,
+      maxHeight: Math.max(40, available - headline.height - gap),
+      weight: 500,
+      lineHeightFactor: 1.45,
+    });
+  }
+
+  const groupHeight = headline.height + (subline ? gap + subline.height : 0);
+  return { headline, subline, gap, groupHeight };
+}
+
+function paintHeadlineGroup(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  top: number,
+  group: { headline: BlockLayout; subline: BlockLayout | null; gap: number },
+  accent: string,
+) {
+  const headlineBottom = paintBlock(ctx, group.headline, { width, top, weight: 800, accent, color: '#ffffff' });
+  if (group.subline) {
+    paintBlock(ctx, group.subline, { width, top: headlineBottom + group.gap, weight: 500, accent, color: 'rgba(255, 255, 255, 0.72)' });
+  }
 }
 
 function tracePill(ctx: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, radius: number) {
@@ -344,19 +467,13 @@ function drawHeadlineTemplate(ctx: CanvasCtx, width: number, height: number, opt
   drawLogoBadge(ctx, width, options);
   const brandBottom = drawBrandStrip(ctx, width, photoHeight + Math.round(height * 0.006));
 
-  const words = splitHeadlineWords(options.headline || 'Type the headline in the Card Studio', options.highlight);
-  drawWrappedBlock(ctx, words, {
-    width,
-    top: brandBottom + Math.round(height * 0.024),
-    maxWidth: width * 0.88,
-    baseFontSize: Math.round(width * (options.format === 'square' ? 0.056 : 0.062)),
-    minFontSize: 36,
-    maxLines: options.format === 'story' ? 6 : 4,
-    maxBottom: height - bottomReserve(height, options),
-    weight: 800,
-    accent: options.accent,
-    color: '#ffffff',
-  });
+  const groupTop = brandBottom + Math.round(height * 0.024);
+  const available = height - bottomReserve(height, options) - groupTop;
+  const group = fitHeadlineGroup(ctx, width, height, options, available, Math.round(width * (options.format === 'square' ? 0.056 : 0.062)));
+
+  // Slight upward bias keeps the optical balance when centering short text.
+  const offset = Math.max(0, ((available - group.groupHeight) / 2) * 0.8);
+  paintHeadlineGroup(ctx, width, groupTop + offset, group, options.accent);
 
   drawBottomStrips(ctx, width, height, options);
 }
@@ -366,21 +483,17 @@ function drawUpdateTemplate(ctx: CanvasCtx, width: number, height: number, optio
   drawBase(ctx, width, height, photoHeight, options);
   drawLogoBadge(ctx, width, options);
   const brandBottom = drawBrandStrip(ctx, width, photoHeight + Math.round(height * 0.006));
-  const chipBottom = drawChip(ctx, width, brandBottom + Math.round(height * 0.018), options.chip);
 
-  const words = splitHeadlineWords(options.headline || 'Type the update in the Card Studio', options.highlight);
-  drawWrappedBlock(ctx, words, {
-    width,
-    top: chipBottom + Math.round(height * 0.02),
-    maxWidth: width * 0.88,
-    baseFontSize: Math.round(width * 0.054),
-    minFontSize: 34,
-    maxLines: options.format === 'story' ? 6 : 4,
-    maxBottom: height - bottomReserve(height, options),
-    weight: 800,
-    accent: options.accent,
-    color: '#ffffff',
-  });
+  const groupTop = brandBottom + Math.round(height * 0.018);
+  const chipFontSize = Math.round(width * 0.024);
+  const chipHeight = Math.round(chipFontSize * 2.1);
+  const chipGap = Math.round(height * 0.02);
+  const available = height - bottomReserve(height, options) - groupTop - chipHeight - chipGap;
+  const group = fitHeadlineGroup(ctx, width, height, options, available, Math.round(width * 0.054));
+
+  const offset = Math.max(0, ((available - group.groupHeight) / 2) * 0.8);
+  const chipBottom = drawChip(ctx, width, groupTop + offset, options.chip);
+  paintHeadlineGroup(ctx, width, chipBottom + chipGap, group, options.accent);
 
   drawBottomStrips(ctx, width, height, options);
 }

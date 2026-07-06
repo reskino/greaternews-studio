@@ -1,5 +1,11 @@
 # Update Log
 
+## 1.7.0 - 2026-07-06
+- Card layout upgrade for Headline and Update templates: optional subline (one sentence of context under the headline), vertical centering of the text group, and grow-to-fit — short headlines scale up to 24% larger (capped at two lines) so cards never look half-empty.
+- "Use selected story" now fills the subline from the story's key facts; the automated cards_DATE.json spec supports subline too.
+- Step 2 editor upgrades: live word-count warnings (quote over 15 words, headline over the 9-word card rule), clickable angle-suggestion chips per category, and the Claude brief now fetches the article's opening paragraphs as verification context when the story has a link.
+- New src/article.ts (excerpt fetcher); brief builder accepts the excerpt.
+
 ## 1.6.0 - 2026-07-06
 - Full auto-render pipeline: the morning run now also writes a card spec (cards_DATE.json) and scripts/render_assets.py turns it into finished assets — card PNGs in every requested size plus 7-second MP4 videos — saved to content/DATE/assets/ with zero clicks. Verified end-to-end: 8 files, 0 failures from today's real stories.
 - New render.html + renderRunner.ts: a headless batch-renderer page built into the app (drives the same card engine and video recorder as the Studio).
