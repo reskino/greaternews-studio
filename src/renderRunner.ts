@@ -58,6 +58,14 @@ function canvasToBlob(canvas: HTMLCanvasElement) {
   return new Promise<Blob | null>((resolve) => canvas.toBlob((blob) => resolve(blob), 'image/png'));
 }
 
+// One stuck video (headless MediaRecorder can wedge) must never block the rest of the batch.
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) => window.setTimeout(() => reject(new Error(`timed out after ${Math.round(ms / 1000)}s`)), ms)),
+  ]);
+}
+
 async function run() {
   let rendered = 0;
   let failed = 0;
@@ -163,7 +171,7 @@ async function run() {
 
       if (card.video && videoExportSupported()) {
         try {
-          const { blob, extension } = await exportCardVideo({ ...options, format: 'story' });
+          const { blob, extension } = await withTimeout(exportCardVideo({ ...options, format: 'story' }), 90_000);
           await upload(`${card.slug}_9x16.${extension}`, blob);
           rendered += 1;
           log(`✓ ${card.slug}_9x16.${extension} (${Math.round(blob.size / 1024)} KB)`, 'ok');

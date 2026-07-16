@@ -2,65 +2,89 @@
   "date": "2026-07-16",
   "cards": [
     {
-      "slug": "ghana-card-ban",
+      "slug": "ghana-card-photocopy-offence",
       "template": "headline",
       "headline": "Photocopying Your Ghana Card Is Now Illegal",
+      "subline": "Biometric checks only — institutions face fines up to GH¢24,000 under newly gazetted NIA rules.",
       "highlight": "Now Illegal",
-      "subline": "Biometric checks only — institutions face fines up to GH¢24,000 under gazetted NIA rules.",
+      "attribution": "",
+      "chip": "",
+      "statValue": "",
       "footer": "Source: Graphic / Pulse",
       "dim": 0.35,
-      "formats": [
-        "portrait",
-        "story"
-      ],
+      "formats": ["portrait"],
       "video": true,
-      "photoQuery": "Ghana Card",
-      "articleUrl": "https://www.graphic.com.gh/news/general-news/photocopying-ghana-card-now-attracts-fines-of-up-to-ghc24-000.html"
+      "photoUrl": null,
+      "articleUrl": "https://www.graphic.com.gh/news/general-news/photocopying-ghana-card-now-attracts-fines-of-up-to-ghc24-000.html",
+      "photoQuery": "National Identification Authority Ghana"
     },
     {
-      "slug": "queiroz-stays",
+      "slug": "queiroz-stays-afcon-2027",
       "template": "update",
-      "chip": "UPDATE",
       "headline": "Queiroz Set To Stay Until AFCON 2027",
-      "highlight": "Set To Stay",
       "subline": "A new two-year deal backed by the GFA and Sports Ministry — signing expected within days.",
-      "footer": "Source: NewsGhana / 3News / Graphic",
+      "highlight": "Set To Stay",
+      "attribution": "",
+      "chip": "UPDATE",
+      "statValue": "",
+      "footer": "Source: NewsGhana / 3News",
       "dim": 0.4,
-      "formats": [
-        "portrait"
-      ],
+      "formats": ["portrait"],
       "video": false,
-      "photoQuery": "Carlos Queiroz",
-      "articleUrl": "https://www.newsghana.com.gh/queiroz-set-for-new-two-year-black-stars-deal/"
+      "photoUrl": null,
+      "articleUrl": "https://www.graphic.com.gh/sports/sports-news/kofi-adams-backs-two-year-contract-for-black-stars-coach-carlos-queiroz.html",
+      "photoQuery": "Carlos Queiroz"
     },
     {
-      "slug": "wc-final-set",
-      "template": "headline",
-      "headline": "Argentina vs Spain — The Final Is Set",
-      "highlight": "The Final",
-      "subline": "Messi's late double-assist sank England; Spain swept France 2-0. Sunday in New Jersey.",
-      "footer": "Source: NPR / FIFA",
-      "dim": 0.35,
-      "formats": [
-        "portrait"
-      ],
+      "slug": "us-strikes-iran-hormuz",
+      "template": "update",
+      "headline": "US Strikes Iran Over Hormuz Shipping",
+      "subline": "A July 8 truce collapsed; the US says a second strike wave targeted Iran's ability to hit ships.",
+      "highlight": "",
+      "attribution": "",
+      "chip": "DEVELOPING",
+      "statValue": "",
+      "footer": "Source: CNN / Reuters",
+      "dim": 0.55,
+      "formats": ["portrait"],
       "video": false,
-      "photoQuery": "MetLife Stadium",
-      "articleUrl": null
+      "photoUrl": null,
+      "articleUrl": null,
+      "photoQuery": "Strait of Hormuz"
     },
     {
-      "slug": "cedi-steady",
+      "slug": "cedi-check-2026-07-16",
       "template": "stat",
-      "statValue": "GH¢12.25",
-      "headline": "to the dollar — two weeks inside the same narrow band on the retail forex market",
-      "footer": "Source: Modern Ghana / BoG",
-      "dim": 0.5,
-      "formats": [
-        "portrait"
-      ],
+      "headline": "Cedi vs the Dollar",
+      "subline": "",
+      "highlight": "",
+      "attribution": "",
+      "chip": "",
+      "statValue": "GH¢12.20",
+      "footer": "Source: Modern Ghana / Bank of Ghana",
+      "dim": 0.3,
+      "formats": ["portrait"],
+      "video": true,
+      "photoUrl": null,
+      "articleUrl": null,
+      "photoQuery": "Bank of Ghana"
+    },
+    {
+      "slug": "afrimma-2026-ghana-nominations",
+      "template": "headline",
+      "headline": "Ghana Bags 21 AFRIMMA Nominations",
+      "subline": "Black Sherif leads Ghana's charge; Sarkodie is up for the Timeless Impact Award.",
+      "highlight": "21 AFRIMMA",
+      "attribution": "",
+      "chip": "",
+      "statValue": "",
+      "footer": "Source: Pulse / GBC",
+      "dim": 0.35,
+      "formats": ["portrait"],
       "video": false,
-      "photoQuery": "Ghanaian cedi",
-      "articleUrl": null
+      "photoUrl": null,
+      "articleUrl": "https://www.pulse.com.gh/story/black-sherif-sarkodiemoliy-and-other-ghanaian-stars-earn-afrimma-2026-nominations-2026071514522732694",
+      "photoQuery": "Black Sherif"
     }
   ]
 }

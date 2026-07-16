@@ -48,7 +48,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 EDGE = r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
 RECEIVER_PORT = 5198
 APP_PORT = 4179
-TIMEOUT_SECONDS = 600
+TIMEOUT_SECONDS = 1500  # photo fetching + multiple videos can push past 10 minutes
 
 run_date = sys.argv[1] if len(sys.argv) > 1 else date.today().isoformat()
 content_dir = os.path.join(ROOT, "content")
