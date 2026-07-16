@@ -3,7 +3,8 @@
 // files back to the server. Driven by scripts/render_assets.py.
 import type { CardFormat, CardOptions, CardTemplate, ChipLabel } from './cardEngine';
 import { drawCard, formatSizes } from './cardEngine';
-import { loadImage, loadImageWithProxyFallback } from './imageSearch';
+import { fetchArticleImage } from './article';
+import { findBestPhoto, loadImage, loadImageWithProxyFallback } from './imageSearch';
 import { exportCardVideo, videoExportSupported } from './videoExport';
 
 const SERVER = 'http://localhost:5198';
@@ -24,6 +25,8 @@ type CardSpec = {
   accent?: string;
   dim?: number;
   photoUrl?: string | null;
+  articleUrl?: string | null;
+  photoQuery?: string | null;
   formats?: CardFormat[];
   video?: boolean;
 };
@@ -83,11 +86,42 @@ async function run() {
 
     for (const card of spec.cards) {
       let photo: HTMLImageElement | null = null;
+      let photoCredit = '';
+
       if (card.photoUrl) {
         try {
           photo = await loadImageWithProxyFallback(card.photoUrl);
         } catch {
           log(`${card.slug}: photo failed to load, rendering without it`, 'err');
+        }
+      }
+
+      // Source-article image (outlet's own photo, credited to the outlet).
+      if (!photo && card.articleUrl) {
+        try {
+          const ogImage = await fetchArticleImage(card.articleUrl);
+          if (ogImage) {
+            photo = await loadImageWithProxyFallback(ogImage);
+            const host = new URL(card.articleUrl).hostname.replace(/^www\./, '');
+            photoCredit = `Photo: via ${host}`;
+            log(`${card.slug}: source image from ${host}`, 'ok');
+          } else {
+            log(`${card.slug}: article has no preview image — trying photoQuery`);
+          }
+        } catch {
+          log(`${card.slug}: source image failed — trying photoQuery`, 'err');
+        }
+      }
+
+      // Licensed auto-photo fallback: Wikipedia/Commons only, credit stamped on the card.
+      if (!photo && card.photoQuery) {
+        const best = await findBestPhoto(card.photoQuery).catch(() => null);
+        if (best) {
+          photo = best.image;
+          photoCredit = best.credit;
+          log(`${card.slug}: photo via "${card.photoQuery}" — ${best.credit}`, 'ok');
+        } else {
+          log(`${card.slug}: no licensed photo found for "${card.photoQuery}" — placeholder used`, 'err');
         }
       }
 
@@ -104,7 +138,7 @@ async function run() {
         statValue: card.statValue ?? '',
         postHandle: card.postHandle ?? '',
         postMeta: card.postMeta ?? '',
-        footer: card.footer ?? '',
+        footer: [card.footer ?? '', photoCredit].filter(Boolean).join('  ·  '),
         handle: card.handle ?? '@GreaterNews · News You Can Trust',
         accent: card.accent ?? '#f3c457',
         dim: card.dim ?? 0.2,

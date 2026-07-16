@@ -7,7 +7,7 @@ import { clampText, downloadText, formatDateTime } from './text';
 import type { CommandMode, LiveFeedState, PostedLogEntry, StoryCategory, StoryDraft, StoryStatus } from './types';
 import { usePostedLog } from './usePostedLog';
 
-const APP_VERSION = '1.8.0';
+const APP_VERSION = '1.9.0';
 const today = new Date().toISOString().slice(0, 10);
 
 const commandModes: Array<{ value: CommandMode; label: string }> = [

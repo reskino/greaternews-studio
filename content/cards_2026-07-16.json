@@ -9,8 +9,13 @@
       "subline": "Biometric checks only — institutions face fines up to GH¢24,000 under gazetted NIA rules.",
       "footer": "Source: Graphic / Pulse",
       "dim": 0.35,
-      "formats": ["portrait", "story"],
-      "video": true
+      "formats": [
+        "portrait",
+        "story"
+      ],
+      "video": true,
+      "photoQuery": "Ghana Card",
+      "articleUrl": "https://www.graphic.com.gh/news/general-news/photocopying-ghana-card-now-attracts-fines-of-up-to-ghc24-000.html"
     },
     {
       "slug": "queiroz-stays",
@@ -21,8 +26,12 @@
       "subline": "A new two-year deal backed by the GFA and Sports Ministry — signing expected within days.",
       "footer": "Source: NewsGhana / 3News / Graphic",
       "dim": 0.4,
-      "formats": ["portrait"],
-      "video": false
+      "formats": [
+        "portrait"
+      ],
+      "video": false,
+      "photoQuery": "Carlos Queiroz",
+      "articleUrl": "https://www.newsghana.com.gh/queiroz-set-for-new-two-year-black-stars-deal/"
     },
     {
       "slug": "wc-final-set",
@@ -32,8 +41,12 @@
       "subline": "Messi's late double-assist sank England; Spain swept France 2-0. Sunday in New Jersey.",
       "footer": "Source: NPR / FIFA",
       "dim": 0.35,
-      "formats": ["portrait"],
-      "video": false
+      "formats": [
+        "portrait"
+      ],
+      "video": false,
+      "photoQuery": "MetLife Stadium",
+      "articleUrl": null
     },
     {
       "slug": "cedi-steady",
@@ -42,8 +55,12 @@
       "headline": "to the dollar — two weeks inside the same narrow band on the retail forex market",
       "footer": "Source: Modern Ghana / BoG",
       "dim": 0.5,
-      "formats": ["portrait"],
-      "video": false
+      "formats": [
+        "portrait"
+      ],
+      "video": false,
+      "photoQuery": "Ghanaian cedi",
+      "articleUrl": null
     }
   ]
 }

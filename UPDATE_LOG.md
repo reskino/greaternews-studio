@@ -1,5 +1,12 @@
 # Update Log
 
+## 1.9.0 - 2026-07-16
+- Auto-rendered cards and videos now carry real background photos. Three-tier photo chain per card: explicit photoUrl → the source article's own image (articleUrl → og:image, credited "Photo: via outlet") → licensed Wikipedia/Commons lookup via photoQuery (credited with author + license) → placeholder. Verified live: the Queiroz card rendered with his CC BY 4.0 photo and auto-credit; the cedi card picked up the public-domain Ghana flag.
+- Morning-run spec now includes articleUrl (Ghana-outlet stories only; null for agency-shot world stories, tragedy, victims, private individuals) and photoQuery guidance.
+- render_assets.py hardened: unique browser profile + debug port per run, stale port-holders cleared on start — fixes the July 13/16 render hangs caused by zombie Edge processes.
+
+
+
 ## 1.8.1 - 2026-07-06
 - Scheduled auto-publishing engine (scripts/publish.py): posts the day's queue to Facebook (Graph API, photo + text) and X (API v2 with OAuth 1.0a signing and media upload). Runs in dry-run until secrets.json exists; failures stay pending with the error recorded and retry at the next slot.
 - Morning run now also writes content/queue_DATE.json (facebook + x posts for the top 3 stories, strongest first) and logs the queue status.

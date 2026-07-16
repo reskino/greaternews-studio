@@ -360,3 +360,23 @@ export async function loadImageWithProxyFallback(url: string) {
     return loadImage(`https://images.weserv.nl/?url=${encodeURIComponent(url)}`);
   }
 }
+
+// Best licensed photo for an editorial query: Wikipedia lead images first (the canonical
+// photo of the entity), then Commons keyword matches. Returns the loaded image plus the
+// attribution line that must appear on the card.
+export async function findBestPhoto(query: string): Promise<{ image: HTMLImageElement; credit: string } | null> {
+  const settled = await Promise.allSettled([searchWikipediaImages(query), searchCommons(query)]);
+  const results = settled.flatMap((result) => (result.status === 'fulfilled' ? result.value : []));
+
+  for (const candidate of dedupeResults(results).slice(0, 4)) {
+    try {
+      const image = await loadImageWithProxyFallback(candidate.fullUrl);
+      const author = candidate.author.length > 24 ? `${candidate.author.slice(0, 23)}…` : candidate.author;
+      return { image, credit: `Photo: ${author} (${candidate.license})` };
+    } catch {
+      // Try the next candidate.
+    }
+  }
+
+  return null;
+}
