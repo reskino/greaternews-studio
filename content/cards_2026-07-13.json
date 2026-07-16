@@ -1,0 +1,61 @@
+{
+  "date": "2026-07-13",
+  "cards": [
+    {
+      "slug": "coach-day",
+      "template": "update",
+      "chip": "DEVELOPING",
+      "headline": "Ghana Names Its New Coach Today",
+      "highlight": "Today",
+      "subline": "The GFA Executive Council has met — the announcement is expected within hours.",
+      "footer": "Source: Graphic / GBC",
+      "dim": 0.4,
+      "formats": ["portrait", "story"],
+      "video": true
+    },
+    {
+      "slug": "no-cholera",
+      "template": "headline",
+      "headline": "No Cholera Outbreak After The Floods",
+      "highlight": "No Cholera",
+      "subline": "GHS confirms zero cases — but warns risk stays high; mass fumigation is underway.",
+      "footer": "Source: GHS / 3News",
+      "dim": 0.4,
+      "formats": ["portrait"],
+      "video": false
+    },
+    {
+      "slug": "eastern-corridor",
+      "template": "headline",
+      "headline": "Eastern Corridor Gets Full Asphalt Rebuild",
+      "highlight": "Full Asphalt Rebuild",
+      "subline": "No more patches — engineers say the corridor has exceeded its design life.",
+      "footer": "Source: Modern Ghana / Adomonline",
+      "dim": 0.4,
+      "formats": ["portrait"],
+      "video": false
+    },
+    {
+      "slug": "ghana-for-gold",
+      "template": "headline",
+      "headline": "Ghana For Gold: Stonebwoy Leads UK Shows",
+      "highlight": "Ghana For Gold",
+      "subline": "REPORTS — London July 17 and Edinburgh August 1, backing Team Ghana to Glasgow.",
+      "footer": "Source: MyJoyOnline — reported",
+      "dim": 0.25,
+      "formats": ["portrait"],
+      "video": false
+    },
+    {
+      "slug": "us-iran-ceasefire",
+      "template": "headline",
+      "headline": "US-Iran Ceasefire Collapses",
+      "highlight": "",
+      "subline": "Trump warns of a \"1,000 missiles\" response as Iran reports 14 dead from strikes.",
+      "footer": "Source: NPR / CNBC",
+      "dim": 0.6,
+      "formats": ["portrait"],
+      "video": false
+    }
+  ]
+}

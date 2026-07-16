@@ -1,0 +1,48 @@
+{
+  "date": "2026-07-11",
+  "cards": [
+    {
+      "slug": "cleaning-day",
+      "template": "headline",
+      "headline": "Today Ghana Cleans — All Seven Regions",
+      "highlight": "Ghana Cleans",
+      "subline": "Ministers, MPs and MMDCEs directed to personally lead the post-flood cleanup.",
+      "footer": "Source: GhanaWeb / Citi Newsroom",
+      "dim": 0.3,
+      "formats": ["portrait", "story"],
+      "video": true
+    },
+    {
+      "slug": "coach-by-monday",
+      "template": "update",
+      "chip": "DEVELOPING",
+      "headline": "New Black Stars Coach Named By Monday",
+      "highlight": "By Monday",
+      "subline": "Renard is out, per reports — his Saudi contract keeps him.",
+      "footer": "Source: GBC / MyJoyOnline",
+      "dim": 0.4,
+      "formats": ["portrait"],
+      "video": false
+    },
+    {
+      "slug": "ebola-600",
+      "template": "stat",
+      "statValue": "600",
+      "headline": "deaths in Congo's Ebola outbreak — Africa's fastest-growing, now spreading beyond Ituri",
+      "footer": "Source: NPR / PBS",
+      "dim": 0.6,
+      "formats": ["portrait"],
+      "video": false
+    },
+    {
+      "slug": "flood-explainer",
+      "template": "recap",
+      "headline": "13 killed in the June 29 Accra floods\nCity flooded again on July 6\nMilitary deployed — Operation Boafo\nNational cleanup July 10-11, seven regions\nOfficials blame choked drains, waterway buildings",
+      "attribution": "Accra's flood crisis in five facts",
+      "footer": "Sources: Graphic / Modern Ghana / GhanaWeb",
+      "dim": 0.55,
+      "formats": ["portrait"],
+      "video": false
+    }
+  ]
+}

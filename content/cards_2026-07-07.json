@@ -1,0 +1,83 @@
+{
+  "date": "2026-07-07",
+  "cards": [
+    {
+      "slug": "queiroz-resigns",
+      "template": "headline",
+      "headline": "Queiroz Resigns As Black Stars Coach",
+      "highlight": "Resigns",
+      "subline": "Two days after the World Cup exit — \"You either win or you learn.\"",
+      "footer": "Source: GhanaWeb / GBC",
+      "dim": 0.35,
+      "formats": [
+        "portrait",
+        "story"
+      ],
+      "video": true
+    },
+    {
+      "slug": "queiroz-quote",
+      "template": "quote",
+      "headline": "You either win or you learn",
+      "attribution": "Carlos Queiroz, departing Black Stars coach",
+      "footer": "Source: GhanaWeb / Graphic Online",
+      "dim": 0.45,
+      "formats": [
+        "portrait"
+      ],
+      "video": false
+    },
+    {
+      "slug": "eurobond-early",
+      "template": "stat",
+      "statValue": "$2.1bn",
+      "headline": "paid to Eurobond holders since January 2025 — the latest $700m settled ahead of schedule",
+      "footer": "Source: Ministry of Finance / GBC",
+      "dim": 0.5,
+      "formats": [
+        "portrait"
+      ],
+      "video": true
+    },
+    {
+      "slug": "accra-flood-update",
+      "template": "update",
+      "headline": "Floods Hit Accra — Military Deployed",
+      "highlight": "",
+      "subline": "Operation Boafo underway after overnight rain submerged the N1, Weija and Kaneshie.",
+      "footer": "Source: Graphic Online / Modern Ghana",
+      "dim": 0.6,
+      "formats": [
+        "portrait",
+        "story"
+      ],
+      "video": false,
+      "chip": "UPDATE"
+    },
+    {
+      "slug": "nato-summit",
+      "template": "headline",
+      "headline": "NATO Summit Opens In Turkey Today",
+      "highlight": "NATO Summit",
+      "subline": "Trump attends — as a first Trump-Netanyahu meeting since February takes shape.",
+      "footer": "Source: Axios / Al Jazeera",
+      "dim": 0.5,
+      "formats": [
+        "portrait"
+      ],
+      "video": false
+    },
+    {
+      "slug": "kasapreko-ipo",
+      "template": "stat",
+      "statValue": "146%",
+      "headline": "oversubscribed — Kasapreko asked GH¢700m and raised GH¢1.72bn from nearly 18,800 investors",
+      "footer": "Source: Ghanaian Times / african-markets",
+      "dim": 0.5,
+      "formats": [
+        "portrait"
+      ],
+      "video": false
+    }
+  ]
+}

@@ -8,14 +8,41 @@ Usage: python scripts/render_assets.py [YYYY-MM-DD]
 
 import json
 import os
+import socket
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import urllib.parse
 import urllib.request
+import uuid
 from datetime import date
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+
+def free_port():
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        return sock.getsockname()[1]
+
+
+def kill_port_holders(*ports):
+    """A crashed previous run can leave Edge/vite holding our ports — clear them first."""
+    try:
+        output = subprocess.check_output(["netstat", "-ano"], text=True)
+    except Exception:
+        return
+    pids = set()
+    for line in output.splitlines():
+        parts = line.split()
+        if len(parts) >= 5 and parts[3] == "LISTENING":
+            for port in ports:
+                if parts[1].endswith(f":{port}"):
+                    pids.add(parts[4])
+    for pid in pids:
+        subprocess.run(["taskkill", "/F", "/PID", pid], capture_output=True)
+        print(f"  cleared stale process {pid}")
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 EDGE = r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
@@ -104,6 +131,8 @@ def wait_for(url, seconds):
     return False
 
 
+kill_port_holders(RECEIVER_PORT, APP_PORT)
+
 server = ThreadingHTTPServer(("127.0.0.1", RECEIVER_PORT), Handler)
 threading.Thread(target=server.serve_forever, daemon=True).start()
 print(f"Receiver on :{RECEIVER_PORT}, assets -> {out_dir}")
@@ -121,14 +150,17 @@ try:
         print("App server did not start.")
         sys.exit(1)
 
+    # Unique debug port and profile per run — a shared profile/port makes a new Edge
+    # hand the URL to any stuck previous instance and exit, hanging the render.
+    profile_dir = os.path.join(tempfile.gettempdir(), f"gn-render-{uuid.uuid4().hex[:8]}")
     edge = subprocess.Popen(
         [
             EDGE,
             "--headless=new",
             "--disable-gpu",
             "--autoplay-policy=no-user-gesture-required",
-            "--remote-debugging-port=9224",
-            f"--user-data-dir={os.path.join(os.environ.get('TEMP', '.'), 'gn-render-profile')}",
+            f"--remote-debugging-port={free_port()}",
+            f"--user-data-dir={profile_dir}",
             f"http://localhost:{APP_PORT}/render.html",
         ],
         stdout=subprocess.DEVNULL,

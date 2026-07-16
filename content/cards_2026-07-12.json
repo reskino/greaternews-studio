@@ -1,0 +1,80 @@
+{
+  "date": "2026-07-12",
+  "cards": [
+    {
+      "slug": "abu-trica-not-guilty",
+      "template": "headline",
+      "headline": "Abu Trica Pleads Not Guilty In US Court",
+      "subline": "Trial set for September 8 over an alleged $8m romance scam targeting elderly Americans.",
+      "highlight": "Not Guilty",
+      "attribution": "",
+      "chip": "",
+      "statValue": "",
+      "footer": "Source: US DOJ / GhanaWeb",
+      "dim": 0.5,
+      "formats": ["portrait"],
+      "video": true,
+      "photoUrl": null
+    },
+    {
+      "slug": "world-cup-semis",
+      "template": "headline",
+      "headline": "Argentina And England Meet In World Cup Semis",
+      "subline": "Bellingham struck twice against Norway; Álvarez sank Switzerland in extra time.",
+      "highlight": "World Cup Semis",
+      "attribution": "",
+      "chip": "",
+      "statValue": "",
+      "footer": "Source: ESPN / CNN",
+      "dim": 0.35,
+      "formats": ["portrait"],
+      "video": false,
+      "photoUrl": null
+    },
+    {
+      "slug": "typhoon-bavi-landfall",
+      "template": "update",
+      "headline": "Typhoon Bavi Slams China After 1.7 Million Flee",
+      "subline": "The storm hit Taizhou at about 144 km/h — China's second typhoon in a week.",
+      "highlight": "",
+      "attribution": "",
+      "chip": "UPDATE",
+      "statValue": "",
+      "footer": "Source: Al Jazeera / AP",
+      "dim": 0.55,
+      "formats": ["portrait"],
+      "video": false,
+      "photoUrl": null
+    },
+    {
+      "slug": "cleanup-ends",
+      "template": "update",
+      "headline": "Two-Day National Cleanup Ends Across Seven Regions",
+      "subline": "Mahama pledges follow-up collection of all garbage heaped by the roadsides.",
+      "highlight": "National Cleanup",
+      "attribution": "",
+      "chip": "UPDATE",
+      "statValue": "",
+      "footer": "Source: Modern Ghana / Graphic",
+      "dim": 0.35,
+      "formats": ["portrait"],
+      "video": false,
+      "photoUrl": null
+    },
+    {
+      "slug": "cedi-check",
+      "template": "stat",
+      "headline": "What one US dollar costs at forex bureaus",
+      "subline": "",
+      "highlight": "",
+      "attribution": "",
+      "chip": "",
+      "statValue": "GH¢12.20",
+      "footer": "Source: Modern Ghana / Bank of Ghana",
+      "dim": 0.4,
+      "formats": ["portrait"],
+      "video": true,
+      "photoUrl": null
+    }
+  ]
+}

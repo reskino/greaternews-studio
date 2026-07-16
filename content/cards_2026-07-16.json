@@ -1,0 +1,49 @@
+{
+  "date": "2026-07-16",
+  "cards": [
+    {
+      "slug": "ghana-card-ban",
+      "template": "headline",
+      "headline": "Photocopying Your Ghana Card Is Now Illegal",
+      "highlight": "Now Illegal",
+      "subline": "Biometric checks only — institutions face fines up to GH¢24,000 under gazetted NIA rules.",
+      "footer": "Source: Graphic / Pulse",
+      "dim": 0.35,
+      "formats": ["portrait", "story"],
+      "video": true
+    },
+    {
+      "slug": "queiroz-stays",
+      "template": "update",
+      "chip": "UPDATE",
+      "headline": "Queiroz Set To Stay Until AFCON 2027",
+      "highlight": "Set To Stay",
+      "subline": "A new two-year deal backed by the GFA and Sports Ministry — signing expected within days.",
+      "footer": "Source: NewsGhana / 3News / Graphic",
+      "dim": 0.4,
+      "formats": ["portrait"],
+      "video": false
+    },
+    {
+      "slug": "wc-final-set",
+      "template": "headline",
+      "headline": "Argentina vs Spain — The Final Is Set",
+      "highlight": "The Final",
+      "subline": "Messi's late double-assist sank England; Spain swept France 2-0. Sunday in New Jersey.",
+      "footer": "Source: NPR / FIFA",
+      "dim": 0.35,
+      "formats": ["portrait"],
+      "video": false
+    },
+    {
+      "slug": "cedi-steady",
+      "template": "stat",
+      "statValue": "GH¢12.25",
+      "headline": "to the dollar — two weeks inside the same narrow band on the retail forex market",
+      "footer": "Source: Modern Ghana / BoG",
+      "dim": 0.5,
+      "formats": ["portrait"],
+      "video": false
+    }
+  ]
+}

@@ -1,0 +1,64 @@
+===== GreaterNews morning run started Sun 07/12/2026  6:03:01.59 ===== 
+Daily run complete for **Sunday, 12 July 2026**. All three files are written, nothing was posted anywhere.
+
+## Story menu (top 5 packed in full)
+
+1. 🇬🇭 **Abu Trica pleads not guilty in US federal court; trial Sept 8** — CONFIRMED. Verified against the official US DOJ press release plus GhanaWeb, GBC, Modern Ghana, The Herald (extradition) and YEN + Tmmotion (the Friday plea). Top story — gets the video script.
+2. ⚽ **World Cup semifinals set: Argentina vs England (Wednesday, Atlanta), Spain vs France** — CONFIRMED (ESPN, CNN, NBC, NPR, Yahoo). Bellingham scored twice against Norway; Álvarez sank Switzerland in extra time.
+3. 🌍 **UPDATE — Typhoon Bavi hit eastern China at Taizhou after 1.7M+ evacuated** — CONFIRMED (Al Jazeera, AP via PBS/US News, CNBC). This closes out the Bavi watch item we opened July 6; no casualty figures are verified yet so none are stated.
+4. 🇬🇭 **UPDATE — Two-day national cleanup ended; Mahama pledges full garbage collection** — CONFIRMED (Modern Ghana, Graphic, GNA, Citi, YFM), with his 11-word quote verified.
+5. 💰 **Cedi check: dollar at GH¢12.20 forex / GH¢11.45 interbank** — CONFIRMED (Modern Ghana series, BoG, Trading Economics). Resolves yesterday's follow-up.
+
+The menu also lists Trump's "1000 missiles" Iran warning (confirmed but not packed), the **"Ghana for Gold" UK concerts** (labeled DEVELOPING — MyJoyOnline and Adomonline are both Multimedia Group, so that's effectively one source), and the coach watch.
+
+## Files written
+
+- `C:\GreaterNews\content\greaternews_2026-07-12.md` — menu, five full packs (Facebook, X, Instagram, WhatsApp, video script for the top story, card text), source URLs per story, and the DEVELOPING follow-up list.
+- `C:\GreaterNews\content\cards_2026-07-12.json` — 5 cards: two headline, two update (UPDATE chips), one stat (GH¢12.20). Video on the top story and the stat card; all `photoUrl: null` since no rights-verified image was confirmed today.
+- `C:\GreaterNews\content\queue_2026-07-12.json` — Facebook + X pairs for the top 3, strongest first; all X posts counted at 247–265 characters.
+
+## Worth flagging
+
+- **The Black Stars coach announcement is due tomorrow (Monday)** — a BREAKING post should be ready to fire; it leads the follow-up list.
+- No repeats: checked against the July 4/6/7/11 packs; the cleanup and Bavi items appear only as their natural UPDATE follow-ups. `posted_log.md` is still empty — say "log it" if you want today's stories recorded there.
+- No fresh confirmed entertainment story existed in the 24–48h window; the concert story stays DEVELOPING until an independent outlet or the organisers confirm it.
+----- rendering card assets ----- 
+Receiver on :5198, assets -> C:\GreaterNews\content\2026-07-12\assets
+Rendering...
+  saved abu-trica-not-guilty_4x5.png (795 KB)
+  saved abu-trica-not-guilty_9x16.mp4 (2532 KB)
+  saved world-cup-semis_4x5.png (905 KB)
+  saved typhoon-bavi-landfall_4x5.png (736 KB)
+  saved cleanup-ends_4x5.png (871 KB)
+  saved cedi-check_4x5.png (662 KB)
+  saved cedi-check_9x16.mp4 (2178 KB)
+Done: 7 files rendered, 0 failures.
+----- publish queue status ----- 
+[would post to facebook] 2026-07-12/assets/abu-trica-not-guilty_4x5.png
+  ABU TRICA PLEADS NOT GUILTY IN US COURT. ⚖️
+
+Ghanaian socialite Abu Trica — real name Frederick Kumi — stood before a US federal judge on Friday and entered his…
+
+[would post to x] 2026-07-12/assets/abu-trica-not-guilty_4x5.png
+  Ghanaian socialite Abu Trica (Frederick Kumi) has pleaded not guilty in a US federal court over an alleged $8m romance scam targeting elderly Americans. Trial s…
+
+[would post to facebook] 2026-07-12/assets/world-cup-semis_4x5.png
+  THE WORLD CUP SEMIFINALS ARE SET — AND IT'S A CLASSIC LINEUP. ⚽🔥
+
+Argentina vs England. Spain vs France. Four heavyweights left standing.
+
+Jude Bellingham score…
+
+[would post to x] 2026-07-12/assets/world-cup-semis_4x5.png
+  World Cup semis are set: Argentina vs England on Wednesday in Atlanta, Spain vs France in the other. Bellingham hit twice in England's 2-1 win over Norway; Álva…
+
+[would post to facebook] 2026-07-12/assets/typhoon-bavi-landfall_4x5.png
+  TYPHOON BAVI SLAMS EASTERN CHINA — 1.7 MILLION EVACUATED.
+
+Typhoon Bavi made landfall in the coastal city of Taizhou late Saturday night, with winds of about 14…
+
+[would post to x] 2026-07-12/assets/typhoon-bavi-landfall_4x5.png
+  Typhoon Bavi has hit eastern China at Taizhou after more than 1.7 million people were evacuated in Zhejiang province. Winds near 144 km/h at landfall — the seco…
+
+6 item(s) pending.
+===== GreaterNews morning run finished Sun 07/12/2026  6:13:28.62 ===== 
