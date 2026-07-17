@@ -258,12 +258,12 @@ function fitHeadlineGroup(
   if (options.subline.trim()) {
     subline = fitBlock(ctx, splitHeadlineWords(options.subline, ''), {
       maxWidth: width * 0.84,
-      baseFontSize: Math.round(width * 0.026),
-      minFontSize: Math.round(width * 0.02),
-      maxLines: 3,
+      baseFontSize: Math.round(width * 0.031),
+      minFontSize: Math.round(width * 0.024),
+      maxLines: 4,
       maxHeight: Math.max(40, available - headline.height - gap),
       weight: 500,
-      lineHeightFactor: 1.45,
+      lineHeightFactor: 1.5,
     });
   }
 
@@ -462,7 +462,8 @@ function drawChip(ctx: CanvasCtx, width: number, y: number, label: ChipLabel) {
 }
 
 function drawHeadlineTemplate(ctx: CanvasCtx, width: number, height: number, options: CardOptions) {
-  const photoHeight = Math.round(height * (options.format === 'square' ? 0.56 : 0.64));
+  // Photo zone trimmed so the brand strip and text sit higher, leaving room for a readable subline.
+  const photoHeight = Math.round(height * (options.format === 'square' ? 0.52 : 0.6));
   drawBase(ctx, width, height, photoHeight, options);
   drawLogoBadge(ctx, width, options);
   const brandBottom = drawBrandStrip(ctx, width, photoHeight + Math.round(height * 0.006));
@@ -472,14 +473,14 @@ function drawHeadlineTemplate(ctx: CanvasCtx, width: number, height: number, opt
   const group = fitHeadlineGroup(ctx, width, height, options, available, Math.round(width * (options.format === 'square' ? 0.056 : 0.062)));
 
   // Slight upward bias keeps the optical balance when centering short text.
-  const offset = Math.max(0, ((available - group.groupHeight) / 2) * 0.8);
+  const offset = Math.max(0, ((available - group.groupHeight) / 2) * 0.6);
   paintHeadlineGroup(ctx, width, groupTop + offset, group, options.accent);
 
   drawBottomStrips(ctx, width, height, options);
 }
 
 function drawUpdateTemplate(ctx: CanvasCtx, width: number, height: number, options: CardOptions) {
-  const photoHeight = Math.round(height * (options.format === 'square' ? 0.52 : 0.6));
+  const photoHeight = Math.round(height * (options.format === 'square' ? 0.48 : 0.56));
   drawBase(ctx, width, height, photoHeight, options);
   drawLogoBadge(ctx, width, options);
   const brandBottom = drawBrandStrip(ctx, width, photoHeight + Math.round(height * 0.006));
@@ -491,7 +492,7 @@ function drawUpdateTemplate(ctx: CanvasCtx, width: number, height: number, optio
   const available = height - bottomReserve(height, options) - groupTop - chipHeight - chipGap;
   const group = fitHeadlineGroup(ctx, width, height, options, available, Math.round(width * 0.054));
 
-  const offset = Math.max(0, ((available - group.groupHeight) / 2) * 0.8);
+  const offset = Math.max(0, ((available - group.groupHeight) / 2) * 0.6);
   const chipBottom = drawChip(ctx, width, groupTop + offset, options.chip);
   paintHeadlineGroup(ctx, width, chipBottom + chipGap, group, options.accent);
 

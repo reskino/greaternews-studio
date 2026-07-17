@@ -101,3 +101,74 @@ The July 8 truce between the US and Iran has broken down. The US says it carried
 
 6 item(s) pending.
 ===== GreaterNews morning run finished Thu 07/16/2026 10:22:09.90 ===== 
+===== GreaterNews morning run started Fri 07/17/2026  6:03:01.78 ===== 
+Both validation attempts need approval I don't have, and PowerShell is unavailable in this shell — but the files were authored as well-formed JSON and I hand-counted every X post during drafting (277→trimmed to ~264, ~260, ~224 chars — all under 280). The three files are written. I have **not posted anything anywhere.**
+
+## GreaterNews Daily Run — Friday, 17 July 2026 ✅
+
+**Session protocol:** Confirmed date (Fri 17 July 2026). Searched Rainbow Radio, Ghanamma, Pulse, Ghana Eye Report, Citi Newsroom, MyJoyOnline, Modern Ghana, Adomonline, The Herald, Asaase Radio + BoG/Trading Economics (cedi), and Al Jazeera, NBC Sports, MLSSoccer, CNN, NPR, Washington Post, Kyiv Independent, Defense News, CBS News. Newest verified stories published **16 July**. Checked all prior packs (04–16 July) and `posted_log.md` (empty) — **no repeats**.
+
+### Story menu — top 5 packed in full
+1. 🇬🇭 **Supreme Court set to grow from 18 → 21** — Mahama nominates Tony Forson, Bernasko-Essah & Amoako Asante — *Politics* — **CONFIRMED** (4 sources) — top story, video
+2. 💰 **Fuel prices up from July 16** — petrol ~GH¢14.52/litre, diesel ~GH¢16 as Hormuz crisis + weaker cedi bite — *Business* — **CONFIRMED** (6 sources) — stat card, video
+3. ⚽ **World Cup final: Spain vs Argentina, Sunday 7pm Ghana time** — Messi vs Yamal — *Sports* — **CONFIRMED** (5 sources)
+4. 🌍 **Zelenskyy fires defence minister Fedorov; protests erupt** — *World* — **CONFIRMED** (4 sources)
+5. 🌍 **UPDATE: Strait of Hormuz near shutdown** — naval blockade back, shipping collapses, talks in Oman — *World* — **CONFIRMED / DEVELOPING** (3 sources) — ties directly to Story 2
+
+Every packed story is verified against **2+ independent current sources**, so none is labelled REPORTS. Story 5 carries the **DEVELOPING** chip.
+
+### Editorial calls
+- **Queiroz not re-packed** — still only "set to sign" (no change since 16 July). It stays on the follow-up list; the signature is the breaking moment.
+- **No fresh entertainment story** existed in the 24–48h window — AFRIMMA was packed on 16 July, so I did **not** repeat it. Flagged as a gap to fill Saturday.
+- **Hormuz** returns only as a genuine update, not a rerun of yesterday.
+
+### Files written
+- `content/greaternews_2026-07-17.md` — menu, 5 full packs (Facebook, X, Instagram, WhatsApp, video script on the top story, card text), per-story source URLs, and the DEVELOPING follow-up list.
+- `content/cards_2026-07-17.json` — 5 cards (3 headline, 1 stat, 1 update/DEVELOPING). Video on the top story + stat card; all `photoUrl: null`; `articleUrl` set for the two Ghana-outlet stories (Supreme Court, fuel) and `null` for the three world/agency stories.
+- `content/queue_2026-07-17.json` — Facebook + X for the top 3, strongest first, all X posts ≤ 280.
+
+### On the follow-up list
+Hormuz/US–Iran (re-verify each post) · fuel prices (next NPA window) · Supreme Court vetting · **World Cup result/reaction pack for Sunday night** · Queiroz signing · 16,000-teachers figure · Mahama Volta-tour deliverables · Bangkok fire (tragedy — needs official numbers) · the entertainment gap.
+
+Nothing has been logged to `posted_log.md` — say **"log it"** to record today's stories, or **"render"/"publish"** when you're ready to run the card/queue pipeline.
+----- rendering card assets ----- 
+  cleared stale process 22772
+Receiver on :5198, assets -> C:\GreaterNews\content\2026-07-17\assets
+Rendering...
+  saved supreme-court-expands-to-21_4x5.png (1702 KB)
+  saved supreme-court-expands-to-21_9x16.mp4 (2434 KB)
+  saved fuel-prices-up-july-16_4x5.png (263 KB)
+  saved fuel-prices-up-july-16_9x16.mp4 (1967 KB)
+  saved world-cup-final-spain-argentina_4x5.png (2105 KB)
+  saved zelenskyy-fires-defence-minister_4x5.png (1122 KB)
+  saved strait-of-hormuz-shutdown_4x5.png (414 KB)
+Done: 7 files rendered, 0 failures.
+----- publish queue status ----- 
+[would post to facebook] 2026-07-17/assets/supreme-court-expands-to-21_4x5.png
+  ⚖️ MAHAMA MOVES TO EXPAND THE SUPREME COURT.
+
+President Mahama has nominated three new justices to Ghana's Supreme Court — Court of Appeal Justices Sophia Berna…
+
+[would post to x] 2026-07-17/assets/supreme-court-expands-to-21_4x5.png
+  President Mahama has nominated three new Supreme Court justices — Tony Forson, Bernasko-Essah and Amoako Asante — a move that would grow Ghana's apex court from…
+
+[would post to facebook] 2026-07-17/assets/fuel-prices-up-july-16_4x5.png
+  ⛽ FUEL PRICES ARE UP AGAIN — HERE'S WHAT YOU'LL PAY.
+
+From Thursday, petrol is selling for around GH¢14.52 a litre and diesel near GH¢16.00, after the NPA raise…
+
+[would post to x] 2026-07-17/assets/fuel-prices-up-july-16_4x5.png
+  ⛽ Fuel prices are up. From July 16, petrol sells around GH¢14.52/litre and diesel near GH¢16 after the NPA raised price floors — blamed on the Strait of Hormuz …
+
+[would post to facebook] 2026-07-17/assets/world-cup-final-spain-argentina_4x5.png
+  ⚽ IT'S THE ONE WE'VE BEEN WAITING FOR — SPAIN vs ARGENTINA. 🏆
+
+The World Cup final is set. Sunday, 7:00pm Ghana time, at MetLife Stadium in New Jersey.
+
+Argenti…
+
+[would post to x] 2026-07-17/assets/world-cup-final-spain-argentina_4x5.png
+  ⚽ It's set: Spain vs Argentina in the World Cup final, Sunday 7:00pm Ghana time at MetLife Stadium. Messi's likely last World Cup game vs 19-year-old Lamine Yam…
+
+6 item(s) pending.
+===== GreaterNews morning run finished Fri 07/17/2026  6:14:00.32 ===== 
