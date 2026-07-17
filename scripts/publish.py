@@ -145,13 +145,62 @@ def publish_x(item, creds):
 
 # ---------- main ----------
 
+def check_credentials(creds):
+    """Read-only validation of both platforms — never posts anything."""
+    ok = True
+
+    fb = creds.get("facebook", {})
+    if fb.get("page_id") and fb.get("page_token"):
+        try:
+            response = requests.get(
+                f"{GRAPH}/{fb['page_id']}",
+                params={"fields": "name,followers_count", "access_token": fb["page_token"]},
+                timeout=30,
+            )
+            response.raise_for_status()
+            data = response.json()
+            print(f"  Facebook OK — page: {data.get('name')} ({data.get('followers_count', '?')} followers)")
+        except Exception as error:
+            ok = False
+            print(f"  Facebook FAILED: {error}")
+    else:
+        ok = False
+        print("  Facebook: page_id/page_token missing from secrets.json")
+
+    x = creds.get("x", {})
+    if all(x.get(key) for key in ("api_key", "api_secret", "access_token", "access_secret")):
+        try:
+            url = "https://api.x.com/2/users/me"
+            response = requests.get(url, headers={"Authorization": oauth1_header("GET", url, x)}, timeout=30)
+            response.raise_for_status()
+            data = response.json().get("data", {})
+            print(f"  X OK — account: @{data.get('username')} ({data.get('name')})")
+        except Exception as error:
+            ok = False
+            print(f"  X FAILED: {error}")
+    else:
+        ok = False
+        print("  X: one or more keys missing from secrets.json")
+
+    return ok
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--date", default=date.today().isoformat())
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--check", action="store_true", help="validate credentials read-only, post nothing")
     parser.add_argument("--next", action="store_true", help="post only the next pending item")
     parser.add_argument("--all", action="store_true", help="post every pending item")
     args = parser.parse_args()
+
+    if args.check:
+        creds = load_secrets()
+        if creds is None:
+            print("No secrets.json found at C:\\GreaterNews\\secrets.json — see PUBLISHING_SETUP.md")
+            sys.exit(1)
+        print("Checking credentials (read-only)...")
+        sys.exit(0 if check_credentials(creds) else 1)
 
     queue_path, queue = load_queue(args.date)
     pending = [item for item in queue.get("items", []) if item.get("status", "pending") == "pending"]
