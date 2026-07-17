@@ -55,6 +55,21 @@ def save_queue(path, queue):
         json.dump(queue, handle, indent=2, ensure_ascii=False)
 
 
+def log_to_posted_log(item, run_date):
+    """Append the published headline to posted_log.md so the morning run's no-repeat check sees it."""
+    path = os.path.join(ROOT, "posted_log.md")
+    headline = item["text"].split("\n")[0][:120]
+    line = f"- {run_date} - [{item['platform']}] {headline}\n"
+    try:
+        existing = open(path, encoding="utf-8").read() if os.path.exists(path) else "# posted_log\n\n"
+        if "No stories logged yet" in existing:
+            existing = "# posted_log\n\n"
+        with open(path, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(existing.rstrip("\n") + "\n" + line)
+    except Exception as error:
+        print(f"  (posted_log.md update failed: {error})")
+
+
 # ---------- Facebook ----------
 
 def publish_facebook(item, creds):
@@ -219,7 +234,26 @@ def main():
         print(f"{len(pending)} item(s) pending.")
         return
 
-    to_post = pending[:1] if args.next else pending if args.all else pending[:1]
+    def platform_configured(platform):
+        if platform == "facebook":
+            fb = creds.get("facebook", {})
+            return bool(fb.get("page_id") and fb.get("page_token"))
+        if platform == "x":
+            x = creds.get("x", {})
+            return all(x.get(key) for key in ("api_key", "api_secret", "access_token", "access_secret"))
+        return False
+
+    # Only attempt platforms with stored credentials — an unconfigured platform's items
+    # stay pending (ready for when its keys arrive) without blocking the others.
+    postable = [item for item in pending if platform_configured(item["platform"])]
+    skipped = len(pending) - len(postable)
+    if skipped:
+        print(f"({skipped} item(s) for unconfigured platforms left pending)")
+    if not postable:
+        print("No pending items for configured platforms.")
+        return
+
+    to_post = postable[:1] if args.next else postable if args.all else postable[:1]
     posted = 0
 
     for item in to_post:
@@ -237,6 +271,7 @@ def main():
             item["postedAt"] = time.strftime("%Y-%m-%dT%H:%M:%S")
             posted += 1
             print(f"POSTED to {platform}: {post_id} — {item['text'][:60]}…")
+            log_to_posted_log(item, args.date)
         except Exception as error:  # keep the queue moving; failures stay pending
             item["status"] = "pending"
             item["lastError"] = str(error)[:300]
