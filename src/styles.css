@@ -226,6 +226,17 @@ input[type='file']::file-selector-button {
     cursor: pointer;
 }
 
+.link-button {
+    margin-left: 8px;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--accent);
+    font: inherit;
+    text-decoration: underline;
+    cursor: pointer;
+}
+
 .field-grid {
     display: grid;
     gap: 12px;

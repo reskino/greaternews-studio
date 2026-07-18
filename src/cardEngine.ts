@@ -19,7 +19,21 @@ export type CardOptions = {
   handle: string;
   accent: string;
   dim: number;
+  // Manual vertical nudge for the headline block: -1 (lower) … 0 (auto) … +1 (higher).
+  // Lifts the whole text block by resizing the photo zone, so the heading moves even when
+  // the text already fills its zone. Bounded so the layout stays valid at the extremes.
+  headlineShift?: number;
 };
+
+// How much of the card height the manual nudge can add to / remove from the photo zone.
+const HEADLINE_SHIFT_RANGE = 0.14;
+
+// Manual nudge raises (positive) or lowers (negative) the whole text block by resizing the
+// photo zone above it. Clamped to a safe range so the photo and text zones stay usable.
+function photoZoneFactor(base: number, shift?: number) {
+  const clampedShift = Math.max(-1, Math.min(1, shift ?? 0));
+  return Math.max(0.34, Math.min(0.7, base - clampedShift * HEADLINE_SHIFT_RANGE));
+}
 
 type CanvasCtx = CanvasRenderingContext2D & { letterSpacing?: string };
 
@@ -218,6 +232,38 @@ function paintBlock(
   return options.top + layout.height;
 }
 
+// Keep only the lines that fit and mark the cut with an ellipsis. A fitted block can still
+// overflow when even the smallest font needs more lines than the zone allows — this guarantees
+// the returned height never exceeds maxLines * lineHeight.
+function ellipsizeBlock(layout: BlockLayout, maxLines: number): BlockLayout {
+  if (maxLines >= layout.lines.length) {
+    return layout;
+  }
+  const lines = layout.lines.slice(0, Math.max(1, maxLines));
+  const lastLine = lines[lines.length - 1];
+  if (lastLine.length > 0) {
+    const lastWord = lastLine[lastLine.length - 1];
+    lines[lines.length - 1] = [
+      ...lastLine.slice(0, -1),
+      { ...lastWord, text: `${lastWord.text.replace(/[.,;:]+$/, '')}…` },
+    ];
+  }
+  return { ...layout, lines, height: lines.length * layout.lineHeight };
+}
+
+// Trim a single line to fit a width, adding an ellipsis. Guards the footer/handle strips
+// against a stray full-paragraph credit line (some Wikimedia Artist fields are essays).
+function ellipsizeToWidth(ctx: CanvasRenderingContext2D, text: string, maxWidth: number) {
+  if (ctx.measureText(text).width <= maxWidth) {
+    return text;
+  }
+  let trimmed = text;
+  while (trimmed.length > 1 && ctx.measureText(`${trimmed}…`).width > maxWidth) {
+    trimmed = trimmed.slice(0, -1);
+  }
+  return `${trimmed.replace(/[\s·,;:-]+$/, '')}…`;
+}
+
 // Headline plus optional subline, vertically centered in the available zone.
 // Short headlines get a capped size boost so the card never looks half-empty.
 function fitHeadlineGroup(
@@ -231,17 +277,24 @@ function fitHeadlineGroup(
   const words = splitHeadlineWords(options.headline || 'Type the headline in the Card Studio', options.highlight);
   const maxWidth = width * 0.88;
   const storyFormat = options.format === 'story';
+  const hasSubline = options.subline.trim().length > 0;
+  const gap = Math.round(height * 0.02);
+
+  // Reserve room for the subline up front so a long headline can't swallow the whole zone
+  // and shove the context text down into the footer.
+  const sublineReserve = hasSubline ? Math.min(Math.round(available * 0.4), Math.round(height * 0.13)) : 0;
+  const headlineBudget = Math.max(baseFontSize, available - (hasSubline ? sublineReserve + gap : 0));
 
   const boosted = fitBlock(ctx, words, {
     maxWidth,
     baseFontSize: Math.round(baseFontSize * 1.24),
     minFontSize: baseFontSize,
     maxLines: 2,
-    maxHeight: available,
+    maxHeight: headlineBudget,
     weight: 800,
   });
 
-  const headline =
+  const fitted =
     boosted.fontSize > baseFontSize && boosted.lines.length <= 2
       ? boosted
       : fitBlock(ctx, words, {
@@ -249,26 +302,40 @@ function fitHeadlineGroup(
           baseFontSize,
           minFontSize: 34,
           maxLines: storyFormat ? 6 : 4,
-          maxHeight: available,
+          maxHeight: headlineBudget,
           weight: 800,
         });
 
-  const gap = Math.round(height * 0.02);
+  // Safety net: if even the smallest font overflows the budget, keep only the lines that fit.
+  const headlineLineCap = Math.max(1, Math.floor(headlineBudget / fitted.lineHeight));
+  const headline = ellipsizeBlock(fitted, Math.min(storyFormat ? 6 : 4, headlineLineCap));
+
   let subline: BlockLayout | null = null;
-  if (options.subline.trim()) {
-    subline = fitBlock(ctx, splitHeadlineWords(options.subline, ''), {
+  if (hasSubline) {
+    const sublineRoom = Math.max(0, available - headline.height - gap);
+    const fittedSub = fitBlock(ctx, splitHeadlineWords(options.subline, ''), {
       maxWidth: width * 0.84,
       baseFontSize: Math.round(width * 0.031),
-      minFontSize: Math.round(width * 0.024),
+      minFontSize: Math.round(width * 0.022),
       maxLines: 4,
-      maxHeight: Math.max(40, available - headline.height - gap),
+      maxHeight: sublineRoom,
       weight: 500,
-      lineHeightFactor: 1.5,
+      lineHeightFactor: 1.42,
     });
+    const sublineLineCap = Math.max(1, Math.floor(sublineRoom / fittedSub.lineHeight));
+    subline = ellipsizeBlock(fittedSub, Math.min(4, sublineLineCap));
   }
 
   const groupHeight = headline.height + (subline ? gap + subline.height : 0);
   return { headline, subline, gap, groupHeight };
+}
+
+// Upward-biased centering of the text group in its zone. The free space (slack) can only ever
+// place the group between the brand strip and the footer, so overlap is impossible.
+function placeGroupTop(zoneTop: number, available: number, groupHeight: number) {
+  const slack = Math.max(0, available - groupHeight);
+  // 0.5 would be dead-center; 0.3 lets short cards sit a touch higher by default.
+  return zoneTop + slack * 0.3;
 }
 
 function paintHeadlineGroup(
@@ -412,13 +479,14 @@ function drawBrandStrip(ctx: CanvasCtx, width: number, y: number) {
 function drawBottomStrips(ctx: CanvasCtx, width: number, height: number, options: CardOptions) {
   const handleText = options.handle.trim();
   const footerText = options.footer.trim();
+  const maxLineWidth = width * 0.9;
 
   if (handleText) {
     ctx.font = `600 ${Math.round(width * 0.021)}px ${FONT_STACK}`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'alphabetic';
     ctx.fillStyle = 'rgba(255, 255, 255, 0.75)';
-    ctx.fillText(handleText, width / 2, height - Math.round(height * (footerText ? 0.052 : 0.028)));
+    ctx.fillText(ellipsizeToWidth(ctx, handleText, maxLineWidth), width / 2, height - Math.round(height * (footerText ? 0.052 : 0.028)));
   }
 
   if (footerText) {
@@ -426,7 +494,7 @@ function drawBottomStrips(ctx: CanvasCtx, width: number, height: number, options
     ctx.textAlign = 'center';
     ctx.textBaseline = 'alphabetic';
     ctx.fillStyle = 'rgba(255, 255, 255, 0.45)';
-    ctx.fillText(footerText, width / 2, height - Math.round(height * 0.024));
+    ctx.fillText(ellipsizeToWidth(ctx, footerText, maxLineWidth), width / 2, height - Math.round(height * 0.024));
   }
 }
 
@@ -463,7 +531,9 @@ function drawChip(ctx: CanvasCtx, width: number, y: number, label: ChipLabel) {
 
 function drawHeadlineTemplate(ctx: CanvasCtx, width: number, height: number, options: CardOptions) {
   // Photo zone trimmed so the brand strip and text sit higher, leaving room for a readable subline.
-  const photoHeight = Math.round(height * (options.format === 'square' ? 0.52 : 0.6));
+  // The manual nudge shrinks (heading up) or grows (heading down) this zone.
+  const baseFactor = options.format === 'square' ? 0.5 : options.format === 'story' ? 0.6 : 0.55;
+  const photoHeight = Math.round(height * photoZoneFactor(baseFactor, options.headlineShift));
   drawBase(ctx, width, height, photoHeight, options);
   drawLogoBadge(ctx, width, options);
   const brandBottom = drawBrandStrip(ctx, width, photoHeight + Math.round(height * 0.006));
@@ -472,15 +542,14 @@ function drawHeadlineTemplate(ctx: CanvasCtx, width: number, height: number, opt
   const available = height - bottomReserve(height, options) - groupTop;
   const group = fitHeadlineGroup(ctx, width, height, options, available, Math.round(width * (options.format === 'square' ? 0.056 : 0.062)));
 
-  // Slight upward bias keeps the optical balance when centering short text.
-  const offset = Math.max(0, ((available - group.groupHeight) / 2) * 0.6);
-  paintHeadlineGroup(ctx, width, groupTop + offset, group, options.accent);
+  const top = placeGroupTop(groupTop, available, group.groupHeight);
+  paintHeadlineGroup(ctx, width, top, group, options.accent);
 
   drawBottomStrips(ctx, width, height, options);
 }
 
 function drawUpdateTemplate(ctx: CanvasCtx, width: number, height: number, options: CardOptions) {
-  const photoHeight = Math.round(height * (options.format === 'square' ? 0.48 : 0.56));
+  const photoHeight = Math.round(height * photoZoneFactor(options.format === 'square' ? 0.48 : 0.56, options.headlineShift));
   drawBase(ctx, width, height, photoHeight, options);
   drawLogoBadge(ctx, width, options);
   const brandBottom = drawBrandStrip(ctx, width, photoHeight + Math.round(height * 0.006));
@@ -492,8 +561,8 @@ function drawUpdateTemplate(ctx: CanvasCtx, width: number, height: number, optio
   const available = height - bottomReserve(height, options) - groupTop - chipHeight - chipGap;
   const group = fitHeadlineGroup(ctx, width, height, options, available, Math.round(width * 0.054));
 
-  const offset = Math.max(0, ((available - group.groupHeight) / 2) * 0.6);
-  const chipBottom = drawChip(ctx, width, groupTop + offset, options.chip);
+  const chipTop = placeGroupTop(groupTop, available, group.groupHeight);
+  const chipBottom = drawChip(ctx, width, chipTop, options.chip);
   paintHeadlineGroup(ctx, width, chipBottom + chipGap, group, options.accent);
 
   drawBottomStrips(ctx, width, height, options);

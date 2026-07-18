@@ -24,6 +24,7 @@ type CardSpec = {
   handle?: string;
   accent?: string;
   dim?: number;
+  headlineShift?: number;
   photoUrl?: string | null;
   articleUrl?: string | null;
   photoQuery?: string | null;
@@ -150,6 +151,7 @@ async function run() {
         handle: card.handle ?? '@GreaterNews · News You Can Trust',
         accent: card.accent ?? '#f3c457',
         dim: card.dim ?? 0.2,
+        headlineShift: card.headlineShift ?? 0,
       };
 
       for (const format of card.formats ?? ['portrait', 'story']) {

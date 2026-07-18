@@ -35,6 +35,12 @@ function initialParam(name: string, fallback: string) {
   return new URLSearchParams(window.location.search).get(name) ?? fallback;
 }
 
+function initialNumber(name: string, fallback: number) {
+  const raw = initialParam(name, '');
+  const value = Number(raw);
+  return raw !== '' && Number.isFinite(value) ? value : fallback;
+}
+
 function initialTemplate(): CardTemplate {
   const requested = initialParam('template', 'headline');
   return (templateOrder as string[]).includes(requested) ? (requested as CardTemplate) : 'headline';
@@ -68,6 +74,7 @@ export default function CardDesigner({
   const [handle, setHandle] = useState(defaultHandle);
   const [accent, setAccent] = useState('#f3c457');
   const [dim, setDim] = useState(0.2);
+  const [textShift, setTextShift] = useState(() => initialNumber('shift', 0));
   const [format, setFormat] = useState<CardFormat>('portrait');
   const [photo, setPhoto] = useState<HTMLImageElement | null>(null);
   const [photoName, setPhotoName] = useState('');
@@ -128,9 +135,10 @@ export default function CardDesigner({
         handle,
         accent,
         dim,
+        headlineShift: textShift,
       });
     }
-  }, [accent, attribution, chip, dim, fontsReady, footer, format, handle, headline, highlight, logo, photo, postHandle, postMeta, statValue, subline, template]);
+  }, [accent, attribution, chip, dim, fontsReady, footer, format, handle, headline, highlight, logo, photo, postHandle, postMeta, statValue, subline, template, textShift]);
 
   function handlePhotoUpload(files: FileList | null) {
     const file = files?.[0];
@@ -221,7 +229,9 @@ export default function CardDesigner({
       setPhoto(image);
       setPhotoName(`${result.title} — ${result.provider}`);
       setPhotoSourcePage(result.sourcePage);
-      setFooter(`Photo: ${result.author} · ${result.license} · ${result.provider}`);
+      // Some Wikimedia Artist fields are whole paragraphs — keep the credit line short.
+      const author = result.author.length > 40 ? `${result.author.slice(0, 39).trimEnd()}…` : result.author;
+      setFooter(`Photo: ${author} · ${result.license} · ${result.provider}`);
     } catch {
       setSearchError('Could not load that image (the source may block downloads). Try another result, or download it manually and upload it.');
     } finally {
@@ -257,6 +267,7 @@ export default function CardDesigner({
         handle,
         accent,
         dim,
+        headlineShift: textShift,
       });
       scratch.toBlob((blob) => resolve(blob), 'image/png');
     });
@@ -325,7 +336,7 @@ export default function CardDesigner({
     setVideoProgress(0);
     try {
       const { blob, extension } = await exportCardVideo(
-        { template, format, photo, logo, headline, subline, highlight, attribution, chip, statValue, postHandle, postMeta, footer, handle, accent, dim },
+        { template, format, photo, logo, headline, subline, highlight, attribution, chip, statValue, postHandle, postMeta, footer, handle, accent, dim, headlineShift: textShift },
         (progress) => setVideoProgress(progress),
       );
       const url = URL.createObjectURL(blob);
@@ -530,6 +541,24 @@ export default function CardDesigner({
               <label>
                 <span>Highlight phrase (colored words inside the headline — skip for tragedy)</span>
                 <input value={highlight} onChange={(event) => setHighlight(event.target.value)} placeholder="e.g. End American Financial Aid" />
+              </label>
+              <label>
+                <span>
+                  Heading position — {textShift === 0 ? 'auto' : `${textShift > 0 ? 'higher' : 'lower'} ${Math.round(Math.abs(textShift) * 100)}%`}
+                  {textShift !== 0 ? (
+                    <button type="button" className="link-button" onClick={() => setTextShift(0)}>
+                      reset
+                    </button>
+                  ) : null}
+                </span>
+                <input
+                  type="range"
+                  min={-100}
+                  max={100}
+                  step={5}
+                  value={Math.round(textShift * 100)}
+                  onChange={(event) => setTextShift(Number(event.target.value) / 100)}
+                />
               </label>
             </>
           ) : null}
