@@ -9,6 +9,11 @@ Usage:
   python scripts/publish.py --next             post the single next pending item
   python scripts/publish.py --all              post every pending item now
   python scripts/publish.py --date 2026-07-06  target a specific day's queue
+
+Scheduling (Facebook only): give a queue item a "scheduleAt" field and --all/--next will
+schedule it with Facebook instead of posting immediately. "scheduleAt" accepts an ISO time
+in Ghana/UTC ("2026-07-18T17:00:00") or an offset from now ("+3h", "+90m", "+2d").
+Facebook requires the time to be 10 minutes to 75 days in the future.
 """
 
 import argparse
@@ -70,12 +75,52 @@ def log_to_posted_log(item, run_date):
         print(f"  (posted_log.md update failed: {error})")
 
 
+# ---------- scheduling ----------
+
+def resolve_schedule(value):
+    """Validate a scheduleAt value and return a future Unix timestamp.
+
+    Accepts an ISO datetime (treated as Ghana/UTC, e.g. "2026-07-18T17:00:00")
+    or an offset from now ("+3h", "+90m", "+2d"). Raises ValueError if the time
+    is outside Facebook's allowed window (10 minutes to 75 days ahead).
+    """
+    from datetime import datetime, timezone
+
+    now = time.time()
+    text = str(value).strip()
+
+    if text.startswith("+"):
+        unit = text[-1].lower()
+        mult = {"m": 60, "h": 3600, "d": 86400}.get(unit)
+        if mult is None:
+            raise ValueError(f"bad offset '{value}' (use +90m, +3h, +2d)")
+        ts = int(now + float(text[1:-1]) * mult)
+    else:
+        dt = datetime.fromisoformat(text)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        ts = int(dt.timestamp())
+
+    if ts < now + 600:
+        raise ValueError("scheduled time must be at least 10 minutes ahead")
+    if ts > now + 75 * 86400:
+        raise ValueError("scheduled time must be within 75 days")
+    return ts
+
+
 # ---------- Facebook ----------
 
-def publish_facebook(item, creds):
+def publish_facebook(item, creds, scheduled_ts=None):
     page_id = creds["page_id"]
     token = creds["page_token"]
     image = item.get("image")
+
+    data = {"message": item["text"], "access_token": token}
+    # A scheduled post is created unpublished with a future publish time; Facebook
+    # then publishes it server-side, so this machine need not be running at that time.
+    if scheduled_ts:
+        data["published"] = "false"
+        data["scheduled_publish_time"] = str(scheduled_ts)
 
     if image:
         image_path = os.path.join(ROOT, "content", image)
@@ -84,14 +129,14 @@ def publish_facebook(item, creds):
         with open(image_path, "rb") as handle:
             response = requests.post(
                 f"{GRAPH}/{page_id}/photos",
-                data={"message": item["text"], "access_token": token},
+                data=data,
                 files={"source": handle},
                 timeout=60,
             )
     else:
         response = requests.post(
             f"{GRAPH}/{page_id}/feed",
-            data={"message": item["text"], "access_token": token},
+            data=data,
             timeout=60,
         )
 
@@ -229,7 +274,8 @@ def main():
         if creds is None and not args.dry_run:
             print("No secrets.json found — running as dry-run. See PUBLISHING_SETUP.md to go live.\n")
         for item in pending:
-            print(f"[would post to {item['platform']}] {item.get('image') or '(no image)'}")
+            when = f" @ {item['scheduleAt']}" if item.get("scheduleAt") else ""
+            print(f"[would post to {item['platform']}{when}] {item.get('image') or '(no image)'}")
             print(f"  {item['text'][:160]}{'…' if len(item['text']) > 160 else ''}\n")
         print(f"{len(pending)} item(s) pending.")
         return
@@ -255,22 +301,34 @@ def main():
 
     to_post = postable[:1] if args.next else postable if args.all else postable[:1]
     posted = 0
+    scheduled = 0
 
     for item in to_post:
         platform = item["platform"]
+        scheduled_ts = None
         try:
+            if item.get("scheduleAt"):
+                scheduled_ts = resolve_schedule(item["scheduleAt"])
             if platform == "facebook":
-                post_id = publish_facebook(item, creds["facebook"])
+                post_id = publish_facebook(item, creds["facebook"], scheduled_ts)
             elif platform == "x":
+                if scheduled_ts:
+                    raise RuntimeError("X scheduling is not supported")
                 post_id = publish_x(item, creds["x"])
             else:
                 print(f"Unknown platform '{platform}' — skipped.")
                 continue
-            item["status"] = "posted"
             item["postId"] = post_id
-            item["postedAt"] = time.strftime("%Y-%m-%dT%H:%M:%S")
-            posted += 1
-            print(f"POSTED to {platform}: {post_id} — {item['text'][:60]}…")
+            if scheduled_ts:
+                item["status"] = "scheduled"
+                item["scheduledFor"] = item["scheduleAt"]
+                scheduled += 1
+                print(f"SCHEDULED on {platform} for {item['scheduleAt']}: {post_id} — {item['text'][:50]}…")
+            else:
+                item["status"] = "posted"
+                item["postedAt"] = time.strftime("%Y-%m-%dT%H:%M:%S")
+                posted += 1
+                print(f"POSTED to {platform}: {post_id} — {item['text'][:60]}…")
             log_to_posted_log(item, args.date)
         except Exception as error:  # keep the queue moving; failures stay pending
             item["status"] = "pending"
@@ -279,7 +337,7 @@ def main():
 
     save_queue(queue_path, queue)
     remaining = len([item for item in queue.get("items", []) if item.get("status", "pending") == "pending"])
-    print(f"Done: {posted} posted, {remaining} still pending.")
+    print(f"Done: {posted} posted, {scheduled} scheduled, {remaining} still pending.")
 
 
 if __name__ == "__main__":
