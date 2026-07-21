@@ -4,6 +4,7 @@ import { drawCard, formatSizes, templateMeta } from './cardEngine';
 import type { ImageResult, SearchPlan } from './imageSearch';
 import { buildHeuristicPlan, dedupeResults, filterByExcludeTerms, findStoryImages, loadImage, loadImageWithProxyFallback, searchCommons, searchGoogleImages, searchOpenverse, searchSerperImages, searchWikipediaImages } from './imageSearch';
 import { resolveQuery } from './aiResolver';
+import { draftVideoBeats } from './videoBeats';
 import type { VideoMotion, VideoSound, VideoVoice } from './videoExport';
 import { exportCardVideo, videoExportSupported } from './videoExport';
 import { SOUND_LABELS } from './videoAudio';
@@ -80,6 +81,7 @@ export default function CardDesigner({
   const [textShift, setTextShift] = useState(() => initialNumber('shift', 0));
   // Extra story beats for the video (one per line) — turns the clip into a multi-scene story.
   const [videoBeats, setVideoBeats] = useState(() => initialParam('beats', '').replace(/\s*\|\s*/g, '\n'));
+  const [draftingBeats, setDraftingBeats] = useState(false);
   const [videoMotion, setVideoMotion] = useState<VideoMotion>('subtle');
   const [videoSound, setVideoSound] = useState<VideoSound>('newsroom');
   const [videoVoice, setVideoVoice] = useState<VideoVoice>('none');
@@ -358,6 +360,25 @@ export default function CardDesigner({
         triggerDownload(blob, formatSizes[key].suffix);
       }
     }
+  }
+
+  async function draftBeatsFromCard() {
+    if (draftingBeats) {
+      return;
+    }
+    if (videoBeats.trim() && !window.confirm('Replace the current video script with a fresh draft from the card?')) {
+      return;
+    }
+    setDraftingBeats(true);
+    try {
+      const beats = await draftVideoBeats({ headline, subline, source: footer });
+      if (beats.length) {
+        setVideoBeats(beats.join('\n'));
+      }
+    } catch {
+      // Leave the box unchanged if drafting fails.
+    }
+    setDraftingBeats(false);
   }
 
   async function downloadVideo() {
@@ -708,7 +729,12 @@ export default function CardDesigner({
           </div>
 
           <label>
-            <span>Video script (one beat per line — optional [SECTION] label; plays as slides after the headline)</span>
+            <span>
+              Video script (one beat per line — optional [SECTION] label; plays as slides after the headline)
+              <button type="button" className="link-button" onClick={() => void draftBeatsFromCard()} disabled={draftingBeats || (!headline.trim() && !subline.trim())}>
+                {draftingBeats ? 'drafting…' : 'draft from card'}
+              </button>
+            </span>
             <textarea
               value={videoBeats}
               onChange={(event) => setVideoBeats(event.target.value)}
