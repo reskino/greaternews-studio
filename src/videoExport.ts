@@ -28,30 +28,28 @@ function easeOutCubic(t: number) {
   return 1 - Math.pow(1 - t, 3);
 }
 
-// Cinematic reveal: black → the card fades in with a slow settle-zoom and gentle drift,
-// landing pixel-exact on the static card so the final frame matches the PNG export.
+// Subtle reveal that starts ON the card — the first frame (and therefore the video's
+// poster/thumbnail) shows the full card, never black — then gently settles from a slight
+// zoom to the exact card, so the final frame still matches the PNG export pixel-for-pixel.
 function drawFrame(ctx: CanvasRenderingContext2D, cardBitmap: HTMLCanvasElement, width: number, height: number, t: number) {
+  // Safety backdrop (never visible: the zoomed card always covers the whole frame).
   ctx.fillStyle = '#000000';
   ctx.fillRect(0, 0, width, height);
 
-  const fadeIn = Math.min(1, t / 0.14);
   const settle = easeOutCubic(Math.min(1, t / 0.85));
-  const scale = 1.1 - 0.1 * settle;
-  const driftY = (1 - settle) * height * 0.015;
+  const scale = 1.04 - 0.04 * settle; // gentle push from 1.04 → 1.0; the 4% zoom keeps the card
+  const driftY = (1 - settle) * height * 0.01; // covering the frame even with the small drift
 
   const drawnWidth = width * scale;
   const drawnHeight = height * scale;
-
-  ctx.save();
-  ctx.globalAlpha = fadeIn;
   ctx.drawImage(cardBitmap, (width - drawnWidth) / 2, (height - drawnHeight) / 2 + driftY, drawnWidth, drawnHeight);
-  ctx.restore();
 
   // Accent line sweeps in along the bottom, then locks to full width.
-  const sweep = Math.max(0, Math.min(1, (t - 0.25) / 0.45));
+  const sweep = Math.max(0, Math.min(1, (t - 0.1) / 0.5));
   if (sweep > 0) {
+    const barHeight = Math.max(4, Math.round(height * 0.004));
     ctx.fillStyle = 'rgba(243, 196, 87, 0.9)';
-    ctx.fillRect(0, height - Math.max(4, Math.round(height * 0.004)), width * easeOutCubic(sweep), Math.max(4, Math.round(height * 0.004)));
+    ctx.fillRect(0, height - barHeight, width * easeOutCubic(sweep), barHeight);
   }
 }
 
