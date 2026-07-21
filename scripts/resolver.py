@@ -33,7 +33,7 @@ MESSAGES_URL = "https://api.anthropic.com/v1/messages"
 
 # Text-to-speech defaults (overridable in secrets.json).
 DEFAULT_GOOGLE_VOICE = "en-GB-Neural2-B"
-DEFAULT_ELEVEN_VOICE = "21m00Tcm4TlvDq8ikWAM"  # ElevenLabs "Rachel"
+DEFAULT_ELEVEN_VOICE = "cjVigY5qzO86Huf0OWal"  # ElevenLabs "Eric" — premade, usable on the free tier
 
 SYSTEM_PROMPT = (
     "You help a Ghana-first news channel (GreaterNews) find a LICENSED photo for a news card.\n"
