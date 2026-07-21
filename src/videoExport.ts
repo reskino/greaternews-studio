@@ -1,6 +1,10 @@
 import type { CardOptions } from './cardEngine';
 import { formatSizes } from './cardEngine';
 import { buildScenes } from './videoScenes';
+import { scheduleBed } from './videoAudio';
+import type { VideoSound } from './videoAudio';
+
+export type { VideoSound } from './videoAudio';
 
 export type VideoExportResult = {
   blob: Blob;
@@ -12,6 +16,7 @@ export type VideoMotion = 'subtle' | 'dynamic' | 'minimal';
 export type VideoConfig = {
   scenes?: string[];
   motion?: VideoMotion;
+  sound?: VideoSound;
 };
 
 type MotionSpec = { zoom: number; transition: 'crossfade' | 'slide' | 'cut'; transitionMs: number };
@@ -119,8 +124,37 @@ export async function exportCardVideo(
 
   paint(0);
 
-  const stream = stage.captureStream(FPS);
-  const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 8_000_000 });
+  const videoStream = stage.captureStream(FPS);
+
+  // Mix in a generated background bed as an audio track, when requested and supported.
+  let recordStream: MediaStream = videoStream;
+  let audioCtx: AudioContext | null = null;
+  const sound = config.sound ?? 'none';
+  if (sound !== 'none' && typeof AudioContext !== 'undefined') {
+    try {
+      audioCtx = new AudioContext();
+      if (audioCtx.state === 'suspended') {
+        await audioCtx.resume();
+      }
+      const master = audioCtx.createGain();
+      const level = 0.6;
+      const fullSeconds = (totalMs + HOLD_MS) / 1000;
+      const now = audioCtx.currentTime;
+      master.gain.setValueAtTime(0.0001, now);
+      master.gain.exponentialRampToValueAtTime(level, now + 0.6);
+      master.gain.setValueAtTime(level, now + Math.max(0.6, fullSeconds - 1.2));
+      master.gain.exponentialRampToValueAtTime(0.0001, now + fullSeconds);
+      const dest = audioCtx.createMediaStreamDestination();
+      master.connect(dest);
+      scheduleBed(audioCtx, master, sound, fullSeconds);
+      recordStream = new MediaStream([...videoStream.getVideoTracks(), ...dest.stream.getAudioTracks()]);
+    } catch {
+      audioCtx = null;
+      recordStream = videoStream;
+    }
+  }
+
+  const recorder = new MediaRecorder(recordStream, { mimeType, videoBitsPerSecond: 8_000_000 });
   const chunks: Blob[] = [];
   recorder.ondataavailable = (event) => {
     if (event.data.size > 0) {
@@ -154,5 +188,8 @@ export async function exportCardVideo(
   recorder.stop();
 
   const blob = await stopped;
+  if (audioCtx) {
+    void audioCtx.close();
+  }
   return { blob, extension: mimeType.includes('mp4') ? 'mp4' : 'webm' };
 }
