@@ -207,7 +207,7 @@ export async function exportCardVideo(
     recordStream = new MediaStream([...videoStream.getVideoTracks(), ...dest.stream.getAudioTracks()]);
   }
 
-  const recorder = new MediaRecorder(recordStream, { mimeType, videoBitsPerSecond: 8_000_000 });
+  const recorder = new MediaRecorder(recordStream, { mimeType, videoBitsPerSecond: 8_000_000, audioBitsPerSecond: 192_000 });
   const chunks: Blob[] = [];
   recorder.ondataavailable = (event) => {
     if (event.data.size > 0) {
@@ -218,7 +218,8 @@ export async function exportCardVideo(
     recorder.onstop = () => resolve(new Blob(chunks, { type: mimeType.split(';')[0] }));
   });
 
-  recorder.start(250);
+  // No timeslice: collect a single blob at stop, avoiding periodic chunk-boundary audio clicks.
+  recorder.start();
   const start = performance.now();
 
   await new Promise<void>((resolve) => {
