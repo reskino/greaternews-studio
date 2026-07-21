@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { CardFormat, CardTemplate, ChipLabel } from './cardEngine';
 import { drawCard, formatSizes, templateMeta } from './cardEngine';
 import type { ImageResult, SearchPlan } from './imageSearch';
-import { buildHeuristicPlan, dedupeResults, filterByExcludeTerms, findStoryImages, loadImage, loadImageWithProxyFallback, searchCommons, searchGoogleImages, searchOpenverse, searchWikipediaImages } from './imageSearch';
+import { buildHeuristicPlan, dedupeResults, filterByExcludeTerms, findStoryImages, loadImage, loadImageWithProxyFallback, searchCommons, searchGoogleImages, searchOpenverse, searchSerperImages, searchWikipediaImages } from './imageSearch';
 import { resolveQuery } from './aiResolver';
 import { exportCardVideo, videoExportSupported } from './videoExport';
 
@@ -170,9 +170,10 @@ export default function CardDesigner({
   // and Openverse cover places, organisations, and concepts.
   async function runQueries(queries: string[], excludeTerms: string[] = []) {
     const freeSources = queries.flatMap((term) => [searchWikipediaImages(term), searchCommons(term), searchOpenverse(term)]);
-    // One web search per run (conserves the daily Google quota) on the best query; no-op
+    // One web search per run (conserves quotas) on the best query; both web sources no-op
     // when unconfigured. Free-licensed sources are listed first so dedupe prefers them.
-    const settled = await Promise.allSettled([...freeSources, searchGoogleImages(queries[0] ?? '')]);
+    const best = queries[0] ?? '';
+    const settled = await Promise.allSettled([...freeSources, searchGoogleImages(best), searchSerperImages(best)]);
     const deduped = dedupeResults(settled.flatMap((result) => (result.status === 'fulfilled' ? result.value : [])));
     const found = filterByExcludeTerms(deduped, excludeTerms).slice(0, 18);
     setResults(found);

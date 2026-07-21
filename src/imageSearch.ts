@@ -523,6 +523,54 @@ export async function searchGoogleImages(query: string): Promise<ImageResult[]> 
   });
 }
 
+type SerperImage = {
+  title?: string;
+  imageUrl?: string;
+  thumbnailUrl?: string;
+  source?: string;
+  domain?: string;
+  link?: string;
+};
+
+// Broad web image search via Serper.dev (real Google Images). Serper is CORS-enabled, so it
+// runs directly from the browser — no project/CSE/enable setup like Google's own API. Returns
+// [] when unconfigured. Results are general web images (usually copyrighted), so they're
+// labelled "verify rights" and credited to their source domain. gl=gh biases to Ghana.
+export async function searchSerperImages(query: string): Promise<ImageResult[]> {
+  const key = import.meta.env.VITE_SERPER_API_KEY;
+  if (!key) {
+    return [];
+  }
+
+  const response = await fetch('https://google.serper.dev/images', {
+    method: 'POST',
+    headers: { 'X-API-KEY': key, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ q: query, num: 10, gl: 'gh' }),
+  });
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`);
+  }
+
+  const data = (await response.json()) as { images?: SerperImage[] };
+  return (data.images ?? []).flatMap((item, index) => {
+    if (!item.imageUrl) {
+      return [];
+    }
+    return [
+      {
+        id: `serper-${index}-${item.imageUrl}`,
+        title: item.title ?? 'Web image',
+        thumbUrl: item.thumbnailUrl ?? item.imageUrl,
+        fullUrl: item.imageUrl,
+        license: '⚠ Web — verify rights',
+        author: item.source ?? item.domain ?? 'web',
+        sourcePage: item.link ?? item.imageUrl,
+        provider: 'Google' as const,
+      },
+    ];
+  });
+}
+
 export function loadImage(url: string, crossOrigin = true) {
   return new Promise<HTMLImageElement>((resolve, reject) => {
     const image = new Image();
