@@ -13,6 +13,10 @@ interface ImportMetaEnv {
   // (no Cloud project / CSE / enablement). The key can't be domain-restricted, so it's
   // visible in the bundle — fine for a personal tool; rotate it if the free quota gets abused.
   readonly VITE_SERPER_API_KEY?: string;
+  // Optional: URL of the hosted TTS proxy (Cloudflare Worker) so voiceover works on the web
+  // from any device. Not secret (the key lives inside the Worker). Falls back to the local
+  // resolver at http://localhost:5199/tts when unset.
+  readonly VITE_TTS_PROXY_URL?: string;
 }
 
 interface ImportMeta {

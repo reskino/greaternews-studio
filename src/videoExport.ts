@@ -31,7 +31,9 @@ const MOTION: Record<VideoMotion, MotionSpec> = {
 
 const HOLD_MS = 500;
 const FPS = 30;
-const TTS_URL = 'http://localhost:5199/tts';
+// Voiceover endpoint: the hosted Cloudflare proxy when set (works on any device), otherwise the
+// local resolver (scripts/resolver.py) for desktop use. The key lives server-side either way.
+const TTS_URL = import.meta.env.VITE_TTS_PROXY_URL || 'http://localhost:5199/tts';
 
 function pickMimeType() {
   const candidates = ['video/mp4;codecs=avc1', 'video/mp4', 'video/webm;codecs=vp9', 'video/webm'];

@@ -38,6 +38,7 @@ jobs:
           VITE_GOOGLE_CSE_KEY: ${{ secrets.VITE_GOOGLE_CSE_KEY }}
           VITE_GOOGLE_CSE_CX: ${{ secrets.VITE_GOOGLE_CSE_CX }}
           VITE_SERPER_API_KEY: ${{ secrets.VITE_SERPER_API_KEY }}
+          VITE_TTS_PROXY_URL: ${{ secrets.VITE_TTS_PROXY_URL }}
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist
