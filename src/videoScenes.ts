@@ -313,8 +313,10 @@ export function buildScenes(options: CardOptions, beats: string[]): VideoScene[]
   }
 
   const scenes: VideoScene[] = [{ bitmap: hero, durationMs: 3500, kind: 'hero' }];
-  clean.map(parseBeat).forEach((beat, index) => {
-    const onPhoto = index % 2 === 0 && options.photo !== null;
+  // Keep the story photo behind every beat (with a dark overlay for legibility); only fall back
+  // to the brand background when the card has no photo at all.
+  const onPhoto = options.photo !== null;
+  clean.map(parseBeat).forEach((beat) => {
     scenes.push({
       bitmap: onPhoto ? renderBeatPhoto(options, beat, width, height) : renderBeatBrand(options, beat, width, height),
       durationMs: 3200,
