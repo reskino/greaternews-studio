@@ -4,6 +4,7 @@ import { drawCard, formatSizes, templateMeta } from './cardEngine';
 import type { ImageResult, SearchPlan } from './imageSearch';
 import { buildHeuristicPlan, dedupeResults, filterByExcludeTerms, findStoryImages, loadImage, loadImageWithProxyFallback, searchCommons, searchGoogleImages, searchOpenverse, searchSerperImages, searchWikipediaImages } from './imageSearch';
 import { resolveQuery } from './aiResolver';
+import type { VideoMotion } from './videoExport';
 import { exportCardVideo, videoExportSupported } from './videoExport';
 
 type CardDesignerProps = {
@@ -78,6 +79,7 @@ export default function CardDesigner({
   const [textShift, setTextShift] = useState(() => initialNumber('shift', 0));
   // Extra story beats for the video (one per line) — turns the clip into a multi-scene story.
   const [videoBeats, setVideoBeats] = useState(() => initialParam('beats', '').replace(/\s*\|\s*/g, '\n'));
+  const [videoMotion, setVideoMotion] = useState<VideoMotion>('subtle');
   const [format, setFormat] = useState<CardFormat>('portrait');
   const [photo, setPhoto] = useState<HTMLImageElement | null>(null);
   const [photoName, setPhotoName] = useState('');
@@ -364,7 +366,7 @@ export default function CardDesigner({
     try {
       const { blob, extension } = await exportCardVideo(
         { template, format, photo, logo, headline, subline, highlight, attribution, chip, statValue, postHandle, postMeta, footer, handle, accent, dim, headlineShift: textShift },
-        videoBeats.split('\n').map((beat) => beat.trim()).filter(Boolean),
+        { scenes: videoBeats.split('\n').map((beat) => beat.trim()).filter(Boolean), motion: videoMotion },
         (progress) => setVideoProgress(progress),
       );
       const url = URL.createObjectURL(blob);
@@ -710,6 +712,14 @@ export default function CardDesigner({
               rows={4}
               placeholder={'Trial set for September 8\nAlleged $8m romance scam\nTargeted elderly Americans'}
             />
+          </label>
+          <label>
+            <span>Video motion style</span>
+            <select value={videoMotion} onChange={(event) => setVideoMotion(event.target.value as VideoMotion)}>
+              <option value="subtle">Subtle — gentle zoom + crossfades</option>
+              <option value="dynamic">Dynamic — bigger zoom + slide transitions</option>
+              <option value="minimal">Minimal — no zoom, hard cuts</option>
+            </select>
           </label>
 
           <div className="designer-actions">

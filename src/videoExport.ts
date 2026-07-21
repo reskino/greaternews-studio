@@ -7,9 +7,23 @@ export type VideoExportResult = {
   extension: 'mp4' | 'webm';
 };
 
+export type VideoMotion = 'subtle' | 'dynamic' | 'minimal';
+
+export type VideoConfig = {
+  scenes?: string[];
+  motion?: VideoMotion;
+};
+
+type MotionSpec = { zoom: number; transition: 'crossfade' | 'slide' | 'cut'; transitionMs: number };
+
+const MOTION: Record<VideoMotion, MotionSpec> = {
+  subtle: { zoom: 0.035, transition: 'crossfade', transitionMs: 450 },
+  dynamic: { zoom: 0.07, transition: 'slide', transitionMs: 380 },
+  minimal: { zoom: 0, transition: 'cut', transitionMs: 0 },
+};
+
 const HOLD_MS = 500;
 const FPS = 30;
-const XFADE_MS = 450;
 
 function pickMimeType() {
   const candidates = ['video/mp4;codecs=avc1', 'video/mp4', 'video/webm;codecs=vp9', 'video/webm'];
@@ -29,21 +43,21 @@ function easeOutCubic(t: number) {
   return 1 - Math.pow(1 - t, 3);
 }
 
-// Draw a scene bitmap with a gentle push-in zoom (p = 0..1 within the scene). At p=0 the bitmap
-// fills the frame exactly, so the hero's first frame is a pixel-exact card (great thumbnail);
-// the zoom only ever grows it, so the frame is always fully covered — never black at the edges.
-function drawScene(ctx: CanvasRenderingContext2D, bitmap: HTMLCanvasElement, width: number, height: number, p: number) {
-  const scale = 1 + 0.035 * easeOutCubic(Math.max(0, Math.min(1, p)));
+// Draw a scene bitmap with a push-in zoom (p = 0..1 within the scene) and an optional horizontal
+// offset (used by the slide transition). At p=0 with offset 0 the bitmap fills the frame exactly,
+// so the hero's first frame is a pixel-exact card, and the zoom only ever grows it — no black edges.
+function drawScene(ctx: CanvasRenderingContext2D, bitmap: HTMLCanvasElement, width: number, height: number, p: number, zoom: number, offsetX: number) {
+  const scale = 1 + zoom * easeOutCubic(Math.max(0, Math.min(1, p)));
   const drawnWidth = width * scale;
   const drawnHeight = height * scale;
-  ctx.drawImage(bitmap, (width - drawnWidth) / 2, (height - drawnHeight) / 2, drawnWidth, drawnHeight);
+  ctx.drawImage(bitmap, (width - drawnWidth) / 2 + offsetX, (height - drawnHeight) / 2, drawnWidth, drawnHeight);
 }
 
-// Renders a card into a short video. `scenes` are the extra story beats: with none, it's the
-// single-hero clip (unchanged); with beats, it's hero → beats (alternating photo/brand) → close.
+// Renders a card into a short video. Empty `scenes` → the single-hero clip (unchanged); with
+// beats → hero → beats (alternating photo/brand) → close. `motion` sets zoom + transition style.
 export async function exportCardVideo(
   options: CardOptions,
-  scenes: string[] = [],
+  config: VideoConfig = {},
   onProgress?: (progress: number) => void,
 ): Promise<VideoExportResult> {
   const mimeType = pickMimeType();
@@ -52,7 +66,8 @@ export async function exportCardVideo(
   }
 
   const { width, height } = formatSizes[options.format];
-  const built = buildScenes(options, scenes);
+  const built = buildScenes(options, config.scenes ?? []);
+  const style = MOTION[config.motion ?? 'subtle'];
 
   const starts: number[] = [];
   let acc = 0;
@@ -78,18 +93,27 @@ export async function exportCardVideo(
     }
     const local = clamped - starts[index];
     const duration = built[index].durationMs;
+    const p = local / duration;
 
     ctx!.fillStyle = '#000000';
     ctx!.fillRect(0, 0, width, height);
-    drawScene(ctx!, built[index].bitmap, width, height, local / duration);
 
-    // Crossfade the next scene in over the last XFADE_MS of this one.
     const remaining = duration - local;
-    if (index < built.length - 1 && remaining < XFADE_MS) {
-      ctx!.save();
-      ctx!.globalAlpha = Math.max(0, Math.min(1, (XFADE_MS - remaining) / XFADE_MS));
-      drawScene(ctx!, built[index + 1].bitmap, width, height, 0);
-      ctx!.restore();
+    const hasNext = index < built.length - 1;
+    const inTransition = hasNext && style.transition !== 'cut' && remaining < style.transitionMs;
+    const a = inTransition ? easeOutCubic((style.transitionMs - remaining) / style.transitionMs) : 0;
+
+    if (inTransition && style.transition === 'slide') {
+      drawScene(ctx!, built[index].bitmap, width, height, p, style.zoom, -width * a);
+      drawScene(ctx!, built[index + 1].bitmap, width, height, 0, style.zoom, width * (1 - a));
+    } else {
+      drawScene(ctx!, built[index].bitmap, width, height, p, style.zoom, 0);
+      if (inTransition && style.transition === 'crossfade') {
+        ctx!.save();
+        ctx!.globalAlpha = a;
+        drawScene(ctx!, built[index + 1].bitmap, width, height, 0, style.zoom, 0);
+        ctx!.restore();
+      }
     }
   }
 

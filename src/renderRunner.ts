@@ -31,6 +31,7 @@ type CardSpec = {
   formats?: CardFormat[];
   video?: boolean;
   scenes?: string[];
+  motion?: 'subtle' | 'dynamic' | 'minimal';
 };
 
 type RenderSpec = {
@@ -174,7 +175,7 @@ async function run() {
 
       if (card.video && videoExportSupported()) {
         try {
-          const { blob, extension } = await withTimeout(exportCardVideo({ ...options, format: 'story' }, card.scenes ?? []), 90_000);
+          const { blob, extension } = await withTimeout(exportCardVideo({ ...options, format: 'story' }, { scenes: card.scenes ?? [], motion: card.motion }), 90_000);
           await upload(`${card.slug}_9x16.${extension}`, blob);
           rendered += 1;
           log(`✓ ${card.slug}_9x16.${extension} (${Math.round(blob.size / 1024)} KB)`, 'ok');
