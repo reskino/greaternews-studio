@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { CardFormat, CardTemplate, ChipLabel } from './cardEngine';
 import { drawCard, formatSizes, templateMeta } from './cardEngine';
 import type { ImageResult, SearchPlan } from './imageSearch';
-import { buildHeuristicPlan, dedupeResults, filterByExcludeTerms, findStoryImages, loadImage, loadImageWithProxyFallback, searchCommons, searchOpenverse, searchWikipediaImages } from './imageSearch';
+import { buildHeuristicPlan, dedupeResults, filterByExcludeTerms, findStoryImages, loadImage, loadImageWithProxyFallback, searchCommons, searchGoogleImages, searchOpenverse, searchWikipediaImages } from './imageSearch';
 import { resolveQuery } from './aiResolver';
 import { exportCardVideo, videoExportSupported } from './videoExport';
 
@@ -169,9 +169,10 @@ export default function CardDesigner({
   // matches, cap at 18. Wikipedia lead images are the best hit for a named person; Commons
   // and Openverse cover places, organisations, and concepts.
   async function runQueries(queries: string[], excludeTerms: string[] = []) {
-    const settled = await Promise.allSettled(
-      queries.flatMap((term) => [searchWikipediaImages(term), searchCommons(term), searchOpenverse(term)]),
-    );
+    const freeSources = queries.flatMap((term) => [searchWikipediaImages(term), searchCommons(term), searchOpenverse(term)]);
+    // One web search per run (conserves the daily Google quota) on the best query; no-op
+    // when unconfigured. Free-licensed sources are listed first so dedupe prefers them.
+    const settled = await Promise.allSettled([...freeSources, searchGoogleImages(queries[0] ?? '')]);
     const deduped = dedupeResults(settled.flatMap((result) => (result.status === 'fulfilled' ? result.value : [])));
     const found = filterByExcludeTerms(deduped, excludeTerms).slice(0, 18);
     setResults(found);

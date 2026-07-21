@@ -30,6 +30,13 @@ jobs:
       # optional deps (esbuild binaries), which would make `npm ci` fail on the runner.
       - run: npm install --no-audit --no-fund
       - run: npm run build
+        env:
+          # Baked into the bundle. Set these as repo secrets (Settings -> Secrets and
+          # variables -> Actions). The Google key must be referrer-restricted to the
+          # Pages domain + Custom Search API only, so exposure in the bundle is safe.
+          VITE_ANTHROPIC_API_KEY: ${{ secrets.VITE_ANTHROPIC_API_KEY }}
+          VITE_GOOGLE_CSE_KEY: ${{ secrets.VITE_GOOGLE_CSE_KEY }}
+          VITE_GOOGLE_CSE_CX: ${{ secrets.VITE_GOOGLE_CSE_CX }}
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist

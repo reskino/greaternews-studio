@@ -6,7 +6,7 @@ export type ImageResult = {
   license: string;
   author: string;
   sourcePage: string;
-  provider: 'Wikimedia Commons' | 'Openverse';
+  provider: 'Wikimedia Commons' | 'Openverse' | 'Google';
 };
 
 type CommonsPage = {
@@ -465,6 +465,59 @@ export async function searchOpenverse(query: string): Promise<ImageResult[]> {
         author: item.creator ?? 'Unknown',
         sourcePage: item.foreign_landing_url ?? '',
         provider: 'Openverse' as const,
+      },
+    ];
+  });
+}
+
+type GoogleImageItem = {
+  title?: string;
+  link?: string;
+  displayLink?: string;
+  mime?: string;
+  image?: { thumbnailLink?: string; contextLink?: string };
+};
+
+// Broad web image search via Google Programmable Search (Custom Search JSON API). Covers the
+// millions of images the free-licensed repos don't — e.g. Ghanaian public figures. Results are
+// general web images (usually copyrighted), so they're labelled "verify rights" and credited to
+// their source domain; confirm you may use one before publishing. Returns [] when unconfigured.
+export async function searchGoogleImages(query: string): Promise<ImageResult[]> {
+  const key = import.meta.env.VITE_GOOGLE_CSE_KEY;
+  const cx = import.meta.env.VITE_GOOGLE_CSE_CX;
+  if (!key || !cx) {
+    return [];
+  }
+
+  const params = new URLSearchParams({
+    key,
+    cx,
+    q: query,
+    searchType: 'image',
+    num: '9',
+    safe: 'active',
+  });
+
+  const response = await fetch(`https://www.googleapis.com/customsearch/v1?${params.toString()}`);
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`);
+  }
+
+  const data = (await response.json()) as { items?: GoogleImageItem[] };
+  return (data.items ?? []).flatMap((item, index) => {
+    if (!item.link) {
+      return [];
+    }
+    return [
+      {
+        id: `google-${index}-${item.link}`,
+        title: item.title ?? 'Web image',
+        thumbUrl: item.image?.thumbnailLink ?? item.link,
+        fullUrl: item.link,
+        license: '⚠ Web — verify rights',
+        author: item.displayLink ?? 'web',
+        sourcePage: item.image?.contextLink ?? item.link,
+        provider: 'Google' as const,
       },
     ];
   });
