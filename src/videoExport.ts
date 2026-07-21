@@ -1,14 +1,15 @@
 import type { CardOptions } from './cardEngine';
-import { drawCard, formatSizes } from './cardEngine';
+import { formatSizes } from './cardEngine';
+import { buildScenes } from './videoScenes';
 
 export type VideoExportResult = {
   blob: Blob;
   extension: 'mp4' | 'webm';
 };
 
-const DURATION_MS = 7000;
-const HOLD_MS = 400;
+const HOLD_MS = 500;
 const FPS = 30;
+const XFADE_MS = 450;
 
 function pickMimeType() {
   const candidates = ['video/mp4;codecs=avc1', 'video/mp4', 'video/webm;codecs=vp9', 'video/webm'];
@@ -28,41 +29,38 @@ function easeOutCubic(t: number) {
   return 1 - Math.pow(1 - t, 3);
 }
 
-// Subtle reveal that starts ON the card — the first frame (and therefore the video's
-// poster/thumbnail) shows the full card, never black — then gently settles from a slight
-// zoom to the exact card, so the final frame still matches the PNG export pixel-for-pixel.
-function drawFrame(ctx: CanvasRenderingContext2D, cardBitmap: HTMLCanvasElement, width: number, height: number, t: number) {
-  // Safety backdrop (never visible: the zoomed card always covers the whole frame).
-  ctx.fillStyle = '#000000';
-  ctx.fillRect(0, 0, width, height);
-
-  const settle = easeOutCubic(Math.min(1, t / 0.85));
-  const scale = 1.04 - 0.04 * settle; // gentle push from 1.04 → 1.0; the 4% zoom keeps the card
-  const driftY = (1 - settle) * height * 0.01; // covering the frame even with the small drift
-
+// Draw a scene bitmap with a gentle push-in zoom (p = 0..1 within the scene). At p=0 the bitmap
+// fills the frame exactly, so the hero's first frame is a pixel-exact card (great thumbnail);
+// the zoom only ever grows it, so the frame is always fully covered — never black at the edges.
+function drawScene(ctx: CanvasRenderingContext2D, bitmap: HTMLCanvasElement, width: number, height: number, p: number) {
+  const scale = 1 + 0.035 * easeOutCubic(Math.max(0, Math.min(1, p)));
   const drawnWidth = width * scale;
   const drawnHeight = height * scale;
-  ctx.drawImage(cardBitmap, (width - drawnWidth) / 2, (height - drawnHeight) / 2 + driftY, drawnWidth, drawnHeight);
-
-  // Accent line sweeps in along the bottom, then locks to full width.
-  const sweep = Math.max(0, Math.min(1, (t - 0.1) / 0.5));
-  if (sweep > 0) {
-    const barHeight = Math.max(4, Math.round(height * 0.004));
-    ctx.fillStyle = 'rgba(243, 196, 87, 0.9)';
-    ctx.fillRect(0, height - barHeight, width * easeOutCubic(sweep), barHeight);
-  }
+  ctx.drawImage(bitmap, (width - drawnWidth) / 2, (height - drawnHeight) / 2, drawnWidth, drawnHeight);
 }
 
-export async function exportCardVideo(options: CardOptions, onProgress?: (progress: number) => void): Promise<VideoExportResult> {
+// Renders a card into a short video. `scenes` are the extra story beats: with none, it's the
+// single-hero clip (unchanged); with beats, it's hero → beats (alternating photo/brand) → close.
+export async function exportCardVideo(
+  options: CardOptions,
+  scenes: string[] = [],
+  onProgress?: (progress: number) => void,
+): Promise<VideoExportResult> {
   const mimeType = pickMimeType();
   if (!mimeType) {
     throw new Error('This browser cannot record video from a canvas.');
   }
 
   const { width, height } = formatSizes[options.format];
+  const built = buildScenes(options, scenes);
 
-  const cardBitmap = document.createElement('canvas');
-  drawCard(cardBitmap, options);
+  const starts: number[] = [];
+  let acc = 0;
+  for (const scene of built) {
+    starts.push(acc);
+    acc += scene.durationMs;
+  }
+  const totalMs = acc;
 
   const stage = document.createElement('canvas');
   stage.width = width;
@@ -72,7 +70,30 @@ export async function exportCardVideo(options: CardOptions, onProgress?: (progre
     throw new Error('Could not create the video canvas.');
   }
 
-  drawFrame(ctx, cardBitmap, width, height, 0);
+  function paint(elapsed: number) {
+    const clamped = Math.max(0, Math.min(elapsed, totalMs - 1));
+    let index = built.length - 1;
+    while (index > 0 && clamped < starts[index]) {
+      index -= 1;
+    }
+    const local = clamped - starts[index];
+    const duration = built[index].durationMs;
+
+    ctx!.fillStyle = '#000000';
+    ctx!.fillRect(0, 0, width, height);
+    drawScene(ctx!, built[index].bitmap, width, height, local / duration);
+
+    // Crossfade the next scene in over the last XFADE_MS of this one.
+    const remaining = duration - local;
+    if (index < built.length - 1 && remaining < XFADE_MS) {
+      ctx!.save();
+      ctx!.globalAlpha = Math.max(0, Math.min(1, (XFADE_MS - remaining) / XFADE_MS));
+      drawScene(ctx!, built[index + 1].bitmap, width, height, 0);
+      ctx!.restore();
+    }
+  }
+
+  paint(0);
 
   const stream = stage.captureStream(FPS);
   const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 8_000_000 });
@@ -82,7 +103,6 @@ export async function exportCardVideo(options: CardOptions, onProgress?: (progre
       chunks.push(event.data);
     }
   };
-
   const stopped = new Promise<Blob>((resolve) => {
     recorder.onstop = () => resolve(new Blob(chunks, { type: mimeType.split(';')[0] }));
   });
@@ -92,11 +112,10 @@ export async function exportCardVideo(options: CardOptions, onProgress?: (progre
 
   await new Promise<void>((resolve) => {
     function tick(now: number) {
-      // rAF timestamps can land just before the performance.now() captured at start.
-      const t = Math.min(1, Math.max(0, (now - start) / DURATION_MS));
-      drawFrame(ctx as CanvasRenderingContext2D, cardBitmap, width, height, t);
-      onProgress?.(t);
-      if (t < 1) {
+      const elapsed = now - start;
+      paint(elapsed);
+      onProgress?.(Math.min(1, elapsed / totalMs));
+      if (elapsed < totalMs) {
         requestAnimationFrame(tick);
       } else {
         resolve();
@@ -105,7 +124,8 @@ export async function exportCardVideo(options: CardOptions, onProgress?: (progre
     requestAnimationFrame(tick);
   });
 
-  // Hold the finished card so the video doesn't cut on the last motion frame.
+  // Hold the final (close) frame so the video doesn't cut on the last motion frame.
+  paint(totalMs - 1);
   await new Promise((resolve) => window.setTimeout(resolve, HOLD_MS));
   recorder.stop();
 

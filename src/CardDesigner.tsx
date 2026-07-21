@@ -76,6 +76,8 @@ export default function CardDesigner({
   const [accent, setAccent] = useState('#f3c457');
   const [dim, setDim] = useState(0.2);
   const [textShift, setTextShift] = useState(() => initialNumber('shift', 0));
+  // Extra story beats for the video (one per line) — turns the clip into a multi-scene story.
+  const [videoBeats, setVideoBeats] = useState(() => initialParam('beats', '').replace(/\s*\|\s*/g, '\n'));
   const [format, setFormat] = useState<CardFormat>('portrait');
   const [photo, setPhoto] = useState<HTMLImageElement | null>(null);
   const [photoName, setPhotoName] = useState('');
@@ -362,6 +364,7 @@ export default function CardDesigner({
     try {
       const { blob, extension } = await exportCardVideo(
         { template, format, photo, logo, headline, subline, highlight, attribution, chip, statValue, postHandle, postMeta, footer, handle, accent, dim, headlineShift: textShift },
+        videoBeats.split('\n').map((beat) => beat.trim()).filter(Boolean),
         (progress) => setVideoProgress(progress),
       );
       const url = URL.createObjectURL(blob);
@@ -699,6 +702,16 @@ export default function CardDesigner({
             </label>
           </div>
 
+          <label>
+            <span>Video story beats (one per line — extra slides after the headline, for the 🎬 video)</span>
+            <textarea
+              value={videoBeats}
+              onChange={(event) => setVideoBeats(event.target.value)}
+              rows={4}
+              placeholder={'Trial set for September 8\nAlleged $8m romance scam\nTargeted elderly Americans'}
+            />
+          </label>
+
           <div className="designer-actions">
             <button type="button" className="secondary" onClick={useSelectedStory}>
               Use selected story
@@ -716,7 +729,7 @@ export default function CardDesigner({
             </button>
             {videoExportSupported() ? (
               <button type="button" className="secondary" onClick={() => void downloadVideo()} disabled={videoProgress >= 0}>
-                {videoProgress >= 0 ? `Rendering video… ${Math.round(videoProgress * 100)}%` : '🎬 Export video (7s)'}
+                {videoProgress >= 0 ? `Rendering video… ${Math.round(videoProgress * 100)}%` : '🎬 Export video'}
               </button>
             ) : null}
             <button type="button" className="primary" onClick={() => void downloadCard()}>
