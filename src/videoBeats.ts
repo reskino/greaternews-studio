@@ -1,7 +1,7 @@
 // Drafts a video script from a card. Produces, per beat: a SHORT on-screen caption, a FULLER spoken
 // narration sentence (so the voice tells the whole story while slides stay readable), and a photo
-// subject to depict. Uses Groq via the server-side proxy first, then Claude (if a browser key is
-// baked in), then a local heuristic — so the button always yields an editable starting point.
+// subject to depict. Uses Claude first (best writing), then Groq via the server-side proxy as a
+// backup, then a local heuristic — so the button always yields an editable starting point.
 
 const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages';
 const MODEL = 'claude-opus-4-8';
@@ -180,17 +180,7 @@ export async function draftVideoBeats(input: BeatsInput): Promise<DraftedBeats> 
     return { captions: [], narration: [], imageQueries: [] };
   }
 
-  // 1. Groq via the proxy (worker on the web, resolver locally).
-  try {
-    const beats = await fromProxy(input);
-    if (beats && beats.captions.length) {
-      return beats;
-    }
-  } catch {
-    // Proxy not reachable — try Claude next.
-  }
-
-  // 2. Claude directly, if a browser key is baked in.
+  // 1. Claude first — the best writing (browser key, baked into the deployed studio).
   const apiKey = import.meta.env.VITE_ANTHROPIC_API_KEY;
   if (apiKey) {
     try {
@@ -199,8 +189,18 @@ export async function draftVideoBeats(input: BeatsInput): Promise<DraftedBeats> 
         return beats;
       }
     } catch {
-      // Fall through to the heuristic.
+      // Fall through to the Groq backup.
     }
+  }
+
+  // 2. Groq via the proxy (worker on the web, resolver locally) — backup.
+  try {
+    const beats = await fromProxy(input);
+    if (beats && beats.captions.length) {
+      return beats;
+    }
+  } catch {
+    // Proxy not reachable — fall through to the heuristic.
   }
 
   // 3. Offline heuristic — always available.
