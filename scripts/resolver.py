@@ -35,7 +35,7 @@ MESSAGES_URL = "https://api.anthropic.com/v1/messages"
 DEFAULT_GOOGLE_VOICE = "en-GB-Neural2-B"
 DEFAULT_ELEVEN_VOICE = "cjVigY5qzO86Huf0OWal"  # ElevenLabs "Eric" — premade, usable on the free tier
 DEFAULT_GROQ_TTS_MODEL = "canopylabs/orpheus-v1-english"  # Groq Orpheus TTS (needs one-time terms acceptance)
-DEFAULT_GROQ_TTS_VOICE = "tara"
+DEFAULT_GROQ_TTS_VOICE = "diana"  # valid Orpheus voices: autumn diana hannah austin daniel troy
 DEFAULT_GROQ_LLM_MODEL = "llama-3.3-70b-versatile"
 
 # System prompt for drafting the video script: a short on-screen caption + a fuller spoken sentence

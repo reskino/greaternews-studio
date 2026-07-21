@@ -9,7 +9,7 @@
 //     ANTHROPIC_MODEL   (Text)    claude-opus-4-8         (optional; e.g. claude-sonnet-5 is cheaper)
 //     GROQ_API_KEY      (Secret)  your Groq key (gsk_...) — free Groq voice + the beats backup
 //     GROQ_TTS_MODEL    (Text)    canopylabs/orpheus-v1-english   (optional; this is the default)
-//     GROQ_TTS_VOICE    (Text)    tara                            (optional; this is the default)
+//     GROQ_TTS_VOICE    (Text)    diana   (optional; one of: autumn diana hannah austin daniel troy)
 //     GROQ_LLM_MODEL    (Text)    llama-3.3-70b-versatile         (optional; this is the default)
 //     ALLOWED_ORIGIN    (Text)    https://reskino.github.io
 //   NOTE: the Groq voice (Orpheus) needs a one-time terms acceptance by the org admin at
@@ -190,7 +190,7 @@ export default {
         body: JSON.stringify({
           model: env.GROQ_TTS_MODEL || 'canopylabs/orpheus-v1-english',
           input: text,
-          voice: env.GROQ_TTS_VOICE || 'tara',
+          voice: env.GROQ_TTS_VOICE || 'diana',
           response_format: 'wav',
         }),
       });
