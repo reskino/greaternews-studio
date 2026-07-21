@@ -595,10 +595,12 @@ export async function loadImageWithProxyFallback(url: string) {
 // photo of the entity), then Commons keyword matches. Returns the loaded image plus the
 // attribution line that must appear on the card.
 export async function findBestPhoto(query: string): Promise<{ image: HTMLImageElement; credit: string } | null> {
-  const settled = await Promise.allSettled([searchWikipediaImages(query), searchCommons(query)]);
-  const results = settled.flatMap((result) => (result.status === 'fulfilled' ? result.value : []));
+  // Tier 1 — freely-licensed sources (Wikipedia lead image, Commons, Openverse). Openverse alone
+  // adds millions of CC-licensed images, so coverage is far wider than Commons+Wikipedia.
+  const settled = await Promise.allSettled([searchWikipediaImages(query), searchCommons(query), searchOpenverse(query)]);
+  const licensed = dedupeResults(settled.flatMap((result) => (result.status === 'fulfilled' ? result.value : [])));
 
-  for (const candidate of dedupeResults(results).slice(0, 4)) {
+  for (const candidate of licensed.slice(0, 5)) {
     try {
       const image = await loadImageWithProxyFallback(candidate.fullUrl);
       const author = candidate.author.length > 24 ? `${candidate.author.slice(0, 23)}…` : candidate.author;
@@ -606,6 +608,22 @@ export async function findBestPhoto(query: string): Promise<{ image: HTMLImageEl
     } catch {
       // Try the next candidate.
     }
+  }
+
+  // Tier 2 — broad web fallback (Serper / Google Images) when nothing licensed matched. Credited to
+  // the source; rights aren't guaranteed, so this is a last resort for coverage.
+  try {
+    const broad = dedupeResults(await searchSerperImages(query));
+    for (const candidate of broad.slice(0, 5)) {
+      try {
+        const image = await loadImageWithProxyFallback(candidate.fullUrl);
+        return { image, credit: `Photo: via ${candidate.author || 'web'}` };
+      } catch {
+        // Try the next candidate.
+      }
+    }
+  } catch {
+    // Serper unavailable (no key) or failed — nothing more to try.
   }
 
   return null;
