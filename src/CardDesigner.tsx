@@ -707,12 +707,12 @@ export default function CardDesigner({
           </div>
 
           <label>
-            <span>Video story beats (one per line — extra slides after the headline, for the 🎬 video)</span>
+            <span>Video script (one beat per line — optional [SECTION] label; plays as slides after the headline)</span>
             <textarea
               value={videoBeats}
               onChange={(event) => setVideoBeats(event.target.value)}
-              rows={4}
-              placeholder={'Trial set for September 8\nAlleged $8m romance scam\nTargeted elderly Americans'}
+              rows={5}
+              placeholder={'[THE STORY] Abu Trica pleads not guilty in a US court\n[THE DETAIL] Charged over an alleged $8m romance scam\n[WHO] Prosecutors say elderly Americans were targeted\n[WHAT’S NEXT] Trial is set for September 8'}
             />
           </label>
           <div className="field-grid">

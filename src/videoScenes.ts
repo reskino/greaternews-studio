@@ -159,8 +159,59 @@ function accentUnderline(ctx: Ctx, width: number, y: number, accent: string) {
   ctx.lineCap = 'butt';
 }
 
+type Beat = { label: string; text: string };
+
+// A beat may carry a section label: "[WHY IT MATTERS] faster data for millions".
+function parseBeat(raw: string): Beat {
+  const match = raw.match(/^\s*\[([^\]]{1,28})\]\s*(.+)$/);
+  if (match) {
+    return { label: match[1].trim().toUpperCase(), text: match[2].trim() };
+  }
+  return { label: '', text: raw.trim() };
+}
+
+// Shared beat layout: brand strip, GN badge, an optional section-label kicker, and the beat
+// line — centered as one group. The caller draws the background (photo or brand) beforehand.
+function drawBeatContent(ctx: Ctx, options: CardOptions, beat: Beat, width: number, height: number) {
+  drawGnBadge(ctx, width, options.logo);
+  drawBrandStrip(ctx, width, Math.round(height * 0.1));
+
+  const kickerFont = Math.round(width * 0.028);
+  const hasLabel = beat.label.length > 0;
+  const kickerBlock = hasLabel ? kickerFont * 1.2 + Math.round(height * 0.022) : 0;
+
+  const fit = fitText(ctx, beat.text, {
+    maxWidth: width * 0.84,
+    maxHeight: height * 0.42,
+    baseFont: Math.round(width * 0.075),
+    minFont: Math.round(width * 0.045),
+    maxLines: 4,
+    weight: 800,
+    factor: 1.18,
+  });
+
+  const groupTop = (height - (kickerBlock + fit.height)) / 2 + Math.round(height * 0.05);
+
+  if (hasLabel) {
+    ctx.font = `800 ${kickerFont}px ${FONT_STACK}`;
+    ctx.letterSpacing = `${Math.round(kickerFont * 0.2)}px`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    ctx.fillStyle = options.accent;
+    ctx.fillText(beat.label, width / 2, groupTop);
+    ctx.letterSpacing = '0px';
+  }
+
+  const textTop = groupTop + kickerBlock;
+  paintCentered(ctx, fit.lines, width, textTop, fit.fontSize, fit.lineHeight, 800, '#ffffff');
+  // The kicker already carries the accent; only add the underline when there's no label.
+  if (!hasLabel) {
+    accentUnderline(ctx, width, textTop + fit.height + Math.round(height * 0.022), options.accent);
+  }
+}
+
 // A story beat shown over the (further-dimmed) story photo.
-function renderBeatPhoto(options: CardOptions, text: string, width: number, height: number) {
+function renderBeatPhoto(options: CardOptions, beat: Beat, width: number, height: number) {
   const canvas = makeCanvas(width, height);
   const ctx = canvas.getContext('2d') as Ctx;
   ctx.fillStyle = BG;
@@ -170,7 +221,6 @@ function renderBeatPhoto(options: CardOptions, text: string, width: number, heig
   } else {
     drawPlaceholder(ctx, width, height);
   }
-  // Darken for legibility, plus a stronger gradient toward the text band.
   ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
   ctx.fillRect(0, 0, width, height);
   const fade = ctx.createLinearGradient(0, height * 0.35, 0, height);
@@ -178,27 +228,12 @@ function renderBeatPhoto(options: CardOptions, text: string, width: number, heig
   fade.addColorStop(1, 'rgba(6, 6, 6, 0.88)');
   ctx.fillStyle = fade;
   ctx.fillRect(0, height * 0.35, width, height * 0.65);
-
-  drawGnBadge(ctx, width, options.logo);
-  drawBrandStrip(ctx, width, Math.round(height * 0.1));
-
-  const fit = fitText(ctx, text, {
-    maxWidth: width * 0.84,
-    maxHeight: height * 0.5,
-    baseFont: Math.round(width * 0.075),
-    minFont: Math.round(width * 0.045),
-    maxLines: 4,
-    weight: 800,
-    factor: 1.18,
-  });
-  const top = (height - fit.height) / 2 + Math.round(height * 0.06);
-  paintCentered(ctx, fit.lines, width, top, fit.fontSize, fit.lineHeight, 800, '#ffffff');
-  accentUnderline(ctx, width, top + fit.height + Math.round(height * 0.022), options.accent);
+  drawBeatContent(ctx, options, beat, width, height);
   return canvas;
 }
 
 // A story beat on the brand background (no photo).
-function renderBeatBrand(options: CardOptions, text: string, width: number, height: number) {
+function renderBeatBrand(options: CardOptions, beat: Beat, width: number, height: number) {
   const canvas = makeCanvas(width, height);
   const ctx = canvas.getContext('2d') as Ctx;
   ctx.fillStyle = BG;
@@ -208,22 +243,7 @@ function renderBeatBrand(options: CardOptions, text: string, width: number, heig
   glow.addColorStop(1, 'rgba(243, 196, 87, 0)');
   ctx.fillStyle = glow;
   ctx.fillRect(0, 0, width, height);
-
-  drawGnBadge(ctx, width, options.logo);
-  drawBrandStrip(ctx, width, Math.round(height * 0.12));
-
-  const fit = fitText(ctx, text, {
-    maxWidth: width * 0.82,
-    maxHeight: height * 0.5,
-    baseFont: Math.round(width * 0.082),
-    minFont: Math.round(width * 0.05),
-    maxLines: 4,
-    weight: 800,
-    factor: 1.18,
-  });
-  const top = (height - fit.height) / 2;
-  paintCentered(ctx, fit.lines, width, top, fit.fontSize, fit.lineHeight, 800, '#ffffff');
-  accentUnderline(ctx, width, top + fit.height + Math.round(height * 0.03), options.accent);
+  drawBeatContent(ctx, options, beat, width, height);
   return canvas;
 }
 
@@ -293,10 +313,10 @@ export function buildScenes(options: CardOptions, beats: string[]): VideoScene[]
   }
 
   const scenes: VideoScene[] = [{ bitmap: hero, durationMs: 3500, kind: 'hero' }];
-  clean.forEach((text, index) => {
+  clean.map(parseBeat).forEach((beat, index) => {
     const onPhoto = index % 2 === 0 && options.photo !== null;
     scenes.push({
-      bitmap: onPhoto ? renderBeatPhoto(options, text, width, height) : renderBeatBrand(options, text, width, height),
+      bitmap: onPhoto ? renderBeatPhoto(options, beat, width, height) : renderBeatBrand(options, beat, width, height),
       durationMs: 3200,
       kind: onPhoto ? 'beat-photo' : 'beat-brand',
     });
