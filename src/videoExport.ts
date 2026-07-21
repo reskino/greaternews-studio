@@ -12,11 +12,13 @@ export type VideoExportResult = {
 };
 
 export type VideoMotion = 'subtle' | 'dynamic' | 'minimal';
+export type VideoVoice = 'none' | 'google' | 'elevenlabs';
 
 export type VideoConfig = {
   scenes?: string[];
   motion?: VideoMotion;
   sound?: VideoSound;
+  voice?: VideoVoice;
 };
 
 type MotionSpec = { zoom: number; transition: 'crossfade' | 'slide' | 'cut'; transitionMs: number };
@@ -29,6 +31,7 @@ const MOTION: Record<VideoMotion, MotionSpec> = {
 
 const HOLD_MS = 500;
 const FPS = 30;
+const TTS_URL = 'http://localhost:5199/tts';
 
 function pickMimeType() {
   const candidates = ['video/mp4;codecs=avc1', 'video/mp4', 'video/webm;codecs=vp9', 'video/webm'];
@@ -48,9 +51,21 @@ function easeOutCubic(t: number) {
   return 1 - Math.pow(1 - t, 3);
 }
 
-// Draw a scene bitmap with a push-in zoom (p = 0..1 within the scene) and an optional horizontal
-// offset (used by the slide transition). At p=0 with offset 0 the bitmap fills the frame exactly,
-// so the hero's first frame is a pixel-exact card, and the zoom only ever grows it — no black edges.
+// The spoken script: headline (hook) → beat lines (labels stripped) → close.
+function voiceoverText(options: CardOptions, scenes: string[]) {
+  const beats = scenes.map((s) => s.replace(/^\s*\[[^\]]*\]\s*/, '').trim()).filter(Boolean);
+  return [options.headline.trim(), ...beats, 'Follow GreaterNews. News you can trust.'].filter(Boolean).join('. ');
+}
+
+async function fetchVoiceover(voice: VideoVoice, text: string, ctx: AudioContext): Promise<AudioBuffer | null> {
+  const response = await fetch(`${TTS_URL}?voice=${voice}&text=${encodeURIComponent(text)}`, { signal: AbortSignal.timeout(60000) });
+  if (!response.ok) {
+    return null;
+  }
+  return ctx.decodeAudioData(await response.arrayBuffer());
+}
+
+// Draw a scene bitmap with a push-in zoom (p within scene) and an x offset (slide transitions).
 function drawScene(ctx: CanvasRenderingContext2D, bitmap: HTMLCanvasElement, width: number, height: number, p: number, zoom: number, offsetX: number) {
   const scale = 1 + zoom * easeOutCubic(Math.max(0, Math.min(1, p)));
   const drawnWidth = width * scale;
@@ -58,8 +73,9 @@ function drawScene(ctx: CanvasRenderingContext2D, bitmap: HTMLCanvasElement, wid
   ctx.drawImage(bitmap, (width - drawnWidth) / 2 + offsetX, (height - drawnHeight) / 2, drawnWidth, drawnHeight);
 }
 
-// Renders a card into a short video. Empty `scenes` → the single-hero clip (unchanged); with
-// beats → hero → beats (alternating photo/brand) → close. `motion` sets zoom + transition style.
+// Renders a card into a short video. Empty scenes → single-hero clip (unchanged); with beats →
+// hero → beats → close. motion sets zoom/transition; sound adds a music bed; voice (via the local
+// resolver's /tts) adds narration, stretches the video to the narration length, and ducks music.
 export async function exportCardVideo(
   options: CardOptions,
   config: VideoConfig = {},
@@ -71,8 +87,44 @@ export async function exportCardVideo(
   }
 
   const { width, height } = formatSizes[options.format];
-  const built = buildScenes(options, config.scenes ?? []);
+  const scenes = config.scenes ?? [];
+  const built = buildScenes(options, scenes);
   const style = MOTION[config.motion ?? 'subtle'];
+  const sound = config.sound ?? 'none';
+  const voice = config.voice ?? 'none';
+
+  // Audio context (shared by music + voice); created only if either is requested.
+  let audioCtx: AudioContext | null = null;
+  if ((sound !== 'none' || voice !== 'none') && typeof AudioContext !== 'undefined') {
+    try {
+      audioCtx = new AudioContext();
+      if (audioCtx.state === 'suspended') {
+        await audioCtx.resume();
+      }
+    } catch {
+      audioCtx = null;
+    }
+  }
+
+  // Fetch narration first so we can size the video to it.
+  let voiceBuffer: AudioBuffer | null = null;
+  if (voice !== 'none' && audioCtx) {
+    try {
+      voiceBuffer = await fetchVoiceover(voice, voiceoverText(options, scenes), audioCtx);
+    } catch {
+      voiceBuffer = null;
+    }
+  }
+
+  // Stretch the scenes to cover the narration (with a short tail), within sane bounds.
+  if (voiceBuffer && built.length > 0) {
+    const currentTotal = built.reduce((sum, scene) => sum + scene.durationMs, 0);
+    const targetTotal = voiceBuffer.duration * 1000 + 900;
+    const scale = Math.max(0.6, Math.min(2.8, targetTotal / currentTotal));
+    built.forEach((scene) => {
+      scene.durationMs = Math.round(scene.durationMs * scale);
+    });
+  }
 
   const starts: number[] = [];
   let acc = 0;
@@ -87,6 +139,7 @@ export async function exportCardVideo(
   stage.height = height;
   const ctx = stage.getContext('2d');
   if (!ctx) {
+    if (audioCtx) void audioCtx.close();
     throw new Error('Could not create the video canvas.');
   }
 
@@ -98,7 +151,6 @@ export async function exportCardVideo(
     }
     const local = clamped - starts[index];
     const duration = built[index].durationMs;
-    const p = local / duration;
 
     ctx!.fillStyle = '#000000';
     ctx!.fillRect(0, 0, width, height);
@@ -109,10 +161,10 @@ export async function exportCardVideo(
     const a = inTransition ? easeOutCubic((style.transitionMs - remaining) / style.transitionMs) : 0;
 
     if (inTransition && style.transition === 'slide') {
-      drawScene(ctx!, built[index].bitmap, width, height, p, style.zoom, -width * a);
+      drawScene(ctx!, built[index].bitmap, width, height, local / duration, style.zoom, -width * a);
       drawScene(ctx!, built[index + 1].bitmap, width, height, 0, style.zoom, width * (1 - a));
     } else {
-      drawScene(ctx!, built[index].bitmap, width, height, p, style.zoom, 0);
+      drawScene(ctx!, built[index].bitmap, width, height, local / duration, style.zoom, 0);
       if (inTransition && style.transition === 'crossfade') {
         ctx!.save();
         ctx!.globalAlpha = a;
@@ -125,33 +177,32 @@ export async function exportCardVideo(
   paint(0);
 
   const videoStream = stage.captureStream(FPS);
-
-  // Mix in a generated background bed as an audio track, when requested and supported.
   let recordStream: MediaStream = videoStream;
-  let audioCtx: AudioContext | null = null;
-  const sound = config.sound ?? 'none';
-  if (sound !== 'none' && typeof AudioContext !== 'undefined') {
-    try {
-      audioCtx = new AudioContext();
-      if (audioCtx.state === 'suspended') {
-        await audioCtx.resume();
-      }
+
+  if (audioCtx && (sound !== 'none' || voiceBuffer)) {
+    const dest = audioCtx.createMediaStreamDestination();
+    const now = audioCtx.currentTime;
+    const fullSeconds = (totalMs + HOLD_MS) / 1000;
+
+    if (sound !== 'none') {
       const master = audioCtx.createGain();
-      const level = 0.6;
-      const fullSeconds = (totalMs + HOLD_MS) / 1000;
-      const now = audioCtx.currentTime;
+      const level = voiceBuffer ? 0.18 : 0.6; // duck music under narration
       master.gain.setValueAtTime(0.0001, now);
       master.gain.exponentialRampToValueAtTime(level, now + 0.6);
       master.gain.setValueAtTime(level, now + Math.max(0.6, fullSeconds - 1.2));
       master.gain.exponentialRampToValueAtTime(0.0001, now + fullSeconds);
-      const dest = audioCtx.createMediaStreamDestination();
       master.connect(dest);
       scheduleBed(audioCtx, master, sound, fullSeconds);
-      recordStream = new MediaStream([...videoStream.getVideoTracks(), ...dest.stream.getAudioTracks()]);
-    } catch {
-      audioCtx = null;
-      recordStream = videoStream;
     }
+
+    if (voiceBuffer) {
+      const source = audioCtx.createBufferSource();
+      source.buffer = voiceBuffer;
+      source.connect(dest);
+      source.start(now + 0.2);
+    }
+
+    recordStream = new MediaStream([...videoStream.getVideoTracks(), ...dest.stream.getAudioTracks()]);
   }
 
   const recorder = new MediaRecorder(recordStream, { mimeType, videoBitsPerSecond: 8_000_000 });
@@ -182,7 +233,6 @@ export async function exportCardVideo(
     requestAnimationFrame(tick);
   });
 
-  // Hold the final (close) frame so the video doesn't cut on the last motion frame.
   paint(totalMs - 1);
   await new Promise((resolve) => window.setTimeout(resolve, HOLD_MS));
   recorder.stop();

@@ -4,7 +4,7 @@ import { drawCard, formatSizes, templateMeta } from './cardEngine';
 import type { ImageResult, SearchPlan } from './imageSearch';
 import { buildHeuristicPlan, dedupeResults, filterByExcludeTerms, findStoryImages, loadImage, loadImageWithProxyFallback, searchCommons, searchGoogleImages, searchOpenverse, searchSerperImages, searchWikipediaImages } from './imageSearch';
 import { resolveQuery } from './aiResolver';
-import type { VideoMotion, VideoSound } from './videoExport';
+import type { VideoMotion, VideoSound, VideoVoice } from './videoExport';
 import { exportCardVideo, videoExportSupported } from './videoExport';
 import { SOUND_LABELS } from './videoAudio';
 
@@ -82,6 +82,7 @@ export default function CardDesigner({
   const [videoBeats, setVideoBeats] = useState(() => initialParam('beats', '').replace(/\s*\|\s*/g, '\n'));
   const [videoMotion, setVideoMotion] = useState<VideoMotion>('subtle');
   const [videoSound, setVideoSound] = useState<VideoSound>('newsroom');
+  const [videoVoice, setVideoVoice] = useState<VideoVoice>('none');
   const [format, setFormat] = useState<CardFormat>('portrait');
   const [photo, setPhoto] = useState<HTMLImageElement | null>(null);
   const [photoName, setPhotoName] = useState('');
@@ -368,7 +369,7 @@ export default function CardDesigner({
     try {
       const { blob, extension } = await exportCardVideo(
         { template, format, photo, logo, headline, subline, highlight, attribution, chip, statValue, postHandle, postMeta, footer, handle, accent, dim, headlineShift: textShift },
-        { scenes: videoBeats.split('\n').map((beat) => beat.trim()).filter(Boolean), motion: videoMotion, sound: videoSound },
+        { scenes: videoBeats.split('\n').map((beat) => beat.trim()).filter(Boolean), motion: videoMotion, sound: videoSound, voice: videoVoice },
         (progress) => setVideoProgress(progress),
       );
       const url = URL.createObjectURL(blob);
@@ -735,6 +736,14 @@ export default function CardDesigner({
               </select>
             </label>
           </div>
+          <label>
+            <span>Voiceover (needs scripts/resolver.py running with a TTS key)</span>
+            <select value={videoVoice} onChange={(event) => setVideoVoice(event.target.value as VideoVoice)}>
+              <option value="none">None (music only)</option>
+              <option value="google">Google voice — free, professional</option>
+              <option value="elevenlabs">ElevenLabs — most human (needs plan for commercial)</option>
+            </select>
+          </label>
 
           <div className="designer-actions">
             <button type="button" className="secondary" onClick={useSelectedStory}>
