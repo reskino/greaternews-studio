@@ -32,6 +32,7 @@ type CardSpec = {
   video?: boolean;
   scenes?: string[];
   narration?: string[];
+  photoQueries?: (string | null)[];
   motion?: 'subtle' | 'dynamic' | 'minimal';
   sound?: 'none' | 'newsroom' | 'uplift' | 'calm';
   voice?: 'none' | 'google' | 'elevenlabs' | 'groq';
@@ -177,8 +178,20 @@ async function run() {
       }
 
       if (card.video && videoExportSupported()) {
+        // Per-beat photos: a licensed image per beat from its photoQuery (falls back to the main photo).
+        let beatPhotos: (HTMLImageElement | null)[] = [];
+        if (card.photoQueries?.length) {
+          beatPhotos = await Promise.all(
+            card.photoQueries.map(async (query) => {
+              if (!query) return null;
+              const best = await findBestPhoto(query).catch(() => null);
+              if (best) log(`${card.slug}: beat photo "${query}" — ${best.credit}`, 'ok');
+              return best?.image ?? null;
+            }),
+          );
+        }
         try {
-          const { blob, extension } = await withTimeout(exportCardVideo({ ...options, format: 'story' }, { scenes: card.scenes ?? [], narration: card.narration, motion: card.motion, sound: card.sound, voice: card.voice }), 90_000);
+          const { blob, extension } = await withTimeout(exportCardVideo({ ...options, format: 'story' }, { scenes: card.scenes ?? [], narration: card.narration, beatPhotos, motion: card.motion, sound: card.sound, voice: card.voice }), 90_000);
           await upload(`${card.slug}_9x16.${extension}`, blob);
           rendered += 1;
           log(`✓ ${card.slug}_9x16.${extension} (${Math.round(blob.size / 1024)} KB)`, 'ok');

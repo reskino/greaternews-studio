@@ -210,14 +210,14 @@ function drawBeatContent(ctx: Ctx, options: CardOptions, beat: Beat, width: numb
   }
 }
 
-// A story beat shown over the (further-dimmed) story photo.
-function renderBeatPhoto(options: CardOptions, beat: Beat, width: number, height: number) {
+// A story beat shown over the (further-dimmed) photo for this beat.
+function renderBeatPhoto(options: CardOptions, beat: Beat, width: number, height: number, photo: HTMLImageElement | null) {
   const canvas = makeCanvas(width, height);
   const ctx = canvas.getContext('2d') as Ctx;
   ctx.fillStyle = BG;
   ctx.fillRect(0, 0, width, height);
-  if (options.photo) {
-    drawPhotoCover(ctx, options.photo, width, height);
+  if (photo) {
+    drawPhotoCover(ctx, photo, width, height);
   } else {
     drawPlaceholder(ctx, width, height);
   }
@@ -302,7 +302,9 @@ function renderCta(options: CardOptions, width: number, height: number) {
 }
 
 // Build the full scene list. No beats → a single hero scene (today's behavior, unchanged).
-export function buildScenes(options: CardOptions, beats: string[]): VideoScene[] {
+// beatPhotos supplies a per-beat image (index-aligned to the beats); each beat falls back to the
+// card's main photo, then to the brand background, so a partial list still works.
+export function buildScenes(options: CardOptions, beats: string[], beatPhotos: (HTMLImageElement | null)[] = []): VideoScene[] {
   const { width, height } = formatSizes[options.format];
   const hero = makeCanvas(width, height);
   drawCard(hero, options);
@@ -313,12 +315,11 @@ export function buildScenes(options: CardOptions, beats: string[]): VideoScene[]
   }
 
   const scenes: VideoScene[] = [{ bitmap: hero, durationMs: 3500, kind: 'hero' }];
-  // Keep the story photo behind every beat (with a dark overlay for legibility); only fall back
-  // to the brand background when the card has no photo at all.
-  const onPhoto = options.photo !== null;
-  clean.map(parseBeat).forEach((beat) => {
+  clean.map(parseBeat).forEach((beat, index) => {
+    const photo = beatPhotos[index] ?? options.photo;
+    const onPhoto = photo !== null;
     scenes.push({
-      bitmap: onPhoto ? renderBeatPhoto(options, beat, width, height) : renderBeatBrand(options, beat, width, height),
+      bitmap: onPhoto ? renderBeatPhoto(options, beat, width, height, photo) : renderBeatBrand(options, beat, width, height),
       durationMs: 3200,
       kind: onPhoto ? 'beat-photo' : 'beat-brand',
     });

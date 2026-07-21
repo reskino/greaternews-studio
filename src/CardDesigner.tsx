@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { CardFormat, CardTemplate, ChipLabel } from './cardEngine';
 import { drawCard, formatSizes, templateMeta } from './cardEngine';
 import type { ImageResult, SearchPlan } from './imageSearch';
-import { buildHeuristicPlan, dedupeResults, filterByExcludeTerms, findStoryImages, loadImage, loadImageWithProxyFallback, searchCommons, searchGoogleImages, searchOpenverse, searchSerperImages, searchWikipediaImages } from './imageSearch';
+import { buildHeuristicPlan, dedupeResults, filterByExcludeTerms, findBestPhoto, findStoryImages, loadImage, loadImageWithProxyFallback, searchCommons, searchGoogleImages, searchOpenverse, searchSerperImages, searchWikipediaImages } from './imageSearch';
 import { resolveQuery } from './aiResolver';
 import { draftVideoBeats } from './videoBeats';
 import type { VideoMotion, VideoSound, VideoVoice } from './videoExport';
@@ -85,8 +85,10 @@ export default function CardDesigner({
   const [videoBeats, setVideoBeats] = useState(() => initialParam('beats', '').replace(/\s*\|\s*/g, '\n'));
   // Fuller spoken narration (one line per beat) — what the voice reads; slides stay short.
   const [videoNarration, setVideoNarration] = useState('');
-  // Per-beat photo subjects the drafter suggests (used by the auto-images feature).
+  // Per-beat photo subjects the drafter suggests + the loaded image for each beat.
   const [videoImageQueries, setVideoImageQueries] = useState<string[]>([]);
+  const [beatImages, setBeatImages] = useState<(HTMLImageElement | null)[]>([]);
+  const [fetchingBeatImages, setFetchingBeatImages] = useState(false);
   const [draftingBeats, setDraftingBeats] = useState(false);
   const [videoMotion, setVideoMotion] = useState<VideoMotion>('subtle');
   const [videoSound, setVideoSound] = useState<VideoSound>('newsroom');
@@ -389,6 +391,58 @@ export default function CardDesigner({
     setDraftingBeats(false);
   }
 
+  function captionLines() {
+    return videoBeats.split('\n').map((line) => line.trim()).filter(Boolean);
+  }
+
+  // The search subject for beat i: the drafter's suggestion, else the caption text (label stripped).
+  function beatQuery(index: number) {
+    const suggested = (videoImageQueries[index] ?? '').trim();
+    if (suggested) return suggested;
+    return (captionLines()[index] ?? '').replace(/^\[[^\]]*\]\s*/, '').trim();
+  }
+
+  function setBeatQuery(index: number, value: string) {
+    setVideoImageQueries((prev) => {
+      const next = prev.slice();
+      while (next.length <= index) next.push('');
+      next[index] = value;
+      return next;
+    });
+  }
+
+  async function fetchBeatImage(index: number) {
+    const query = beatQuery(index);
+    if (!query) return;
+    const best = await findBestPhoto(query).catch(() => null);
+    setBeatImages((prev) => {
+      const next = prev.slice();
+      while (next.length <= index) next.push(null);
+      next[index] = best?.image ?? null;
+      return next;
+    });
+  }
+
+  async function autoFillBeatImages() {
+    const captions = captionLines();
+    if (!captions.length || fetchingBeatImages) return;
+    setFetchingBeatImages(true);
+    try {
+      const images = await Promise.all(
+        captions.map(async (_, index) => {
+          const query = beatQuery(index);
+          if (!query) return null;
+          const best = await findBestPhoto(query).catch(() => null);
+          return best?.image ?? null;
+        }),
+      );
+      setBeatImages(images);
+    } catch {
+      // Leave existing images in place on failure.
+    }
+    setFetchingBeatImages(false);
+  }
+
   async function downloadVideo() {
     if (videoProgress >= 0) {
       return;
@@ -398,7 +452,7 @@ export default function CardDesigner({
     try {
       const { blob, extension } = await exportCardVideo(
         { template, format, photo, logo, headline, subline, highlight, attribution, chip, statValue, postHandle, postMeta, footer, handle, accent, dim, headlineShift: textShift },
-        { scenes: videoBeats.split('\n').map((beat) => beat.trim()).filter(Boolean), narration: videoNarration.split('\n').map((line) => line.trim()).filter(Boolean), motion: videoMotion, sound: videoSound, voice: videoVoice },
+        { scenes: videoBeats.split('\n').map((beat) => beat.trim()).filter(Boolean), narration: videoNarration.split('\n').map((line) => line.trim()).filter(Boolean), beatPhotos: beatImages, motion: videoMotion, sound: videoSound, voice: videoVoice },
         (progress) => setVideoProgress(progress),
       );
       const url = URL.createObjectURL(blob);
@@ -768,6 +822,36 @@ export default function CardDesigner({
               placeholder={'Leave blank to speak the captions. Or click “draft from card” to get a fuller, flowing narration here — the slides stay short while the voice tells the whole story.'}
             />
           </label>
+          {captionLines().length > 0 ? (
+            <div className="beat-images">
+              <span style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                Clip images — one per caption (licensed Wikipedia / Commons, auto-credited)
+                <button type="button" className="link-button" onClick={() => void autoFillBeatImages()} disabled={fetchingBeatImages}>
+                  {fetchingBeatImages ? 'finding…' : 'auto-fill images'}
+                </button>
+              </span>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}>
+                {captionLines().map((caption, index) => (
+                  <div key={index} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <div style={{ width: 44, height: 58, flexShrink: 0, borderRadius: 6, overflow: 'hidden', background: 'rgba(255,255,255,0.08)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      {beatImages[index] ? (
+                        <img src={beatImages[index]!.src} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                      ) : (
+                        <span style={{ fontSize: 16, opacity: 0.4 }}>▢</span>
+                      )}
+                    </div>
+                    <input
+                      value={videoImageQueries[index] ?? ''}
+                      onChange={(event) => setBeatQuery(index, event.target.value)}
+                      placeholder={caption.replace(/^\[[^\]]*\]\s*/, '') || 'photo subject'}
+                      style={{ flex: 1, minWidth: 0 }}
+                    />
+                    <button type="button" className="secondary" onClick={() => void fetchBeatImage(index)}>find</button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
           <div className="field-grid">
             <label>
               <span>Video motion style</span>

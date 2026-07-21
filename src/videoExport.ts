@@ -19,6 +19,7 @@ export type VideoVoice = 'none' | 'google' | 'elevenlabs' | 'groq';
 export type VideoConfig = {
   scenes?: string[];
   narration?: string[];
+  beatPhotos?: (HTMLImageElement | null)[];
   motion?: VideoMotion;
   sound?: VideoSound;
   voice?: VideoVoice;
@@ -114,7 +115,7 @@ type Timeline = {
 function buildTimeline(options: CardOptions, config: VideoConfig, voiceBuffer: AudioBuffer | null): Timeline {
   const { width, height } = formatSizes[options.format];
   const scenes = config.scenes ?? [];
-  const built = buildScenes(options, scenes);
+  const built = buildScenes(options, scenes, config.beatPhotos ?? []);
   const style = MOTION[config.motion ?? 'subtle'];
 
   // Stretch the scenes to cover the narration (with a short tail), within sane bounds.
