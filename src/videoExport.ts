@@ -14,7 +14,7 @@ export type VideoExportResult = {
 };
 
 export type VideoMotion = 'subtle' | 'dynamic' | 'minimal';
-export type VideoVoice = 'none' | 'google' | 'elevenlabs';
+export type VideoVoice = 'none' | 'google' | 'elevenlabs' | 'groq';
 
 export type VideoConfig = {
   scenes?: string[];

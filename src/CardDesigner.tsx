@@ -763,11 +763,12 @@ export default function CardDesigner({
             </label>
           </div>
           <label>
-            <span>Voiceover (needs scripts/resolver.py running with a TTS key)</span>
+            <span>Voiceover</span>
             <select value={videoVoice} onChange={(event) => setVideoVoice(event.target.value as VideoVoice)}>
               <option value="none">None (music only)</option>
-              <option value="google">Google voice — free, professional</option>
+              <option value="groq">Groq (Orpheus) — free, natural</option>
               <option value="elevenlabs">ElevenLabs — most human (needs plan for commercial)</option>
+              <option value="google">Google voice — needs billing enabled</option>
             </select>
           </label>
 

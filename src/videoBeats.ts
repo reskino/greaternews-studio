@@ -5,6 +5,9 @@
 
 const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages';
 const MODEL = 'claude-opus-4-8';
+// Beats proxy: the hosted worker (?mode=beats) when set, else the local resolver's /beats. It runs
+// Groq's LLM server-side so the key never reaches the browser.
+const PROXY = import.meta.env.VITE_TTS_PROXY_URL;
 
 const SYSTEM_PROMPT = [
   'You write the spoken script for a short news video for GreaterNews, a Ghana-first news channel.',
@@ -71,6 +74,22 @@ export function heuristicBeats(input: BeatsInput): string[] {
   return beats;
 }
 
+// Groq beats via the server-side proxy (hosted worker or local resolver).
+async function fromProxy(input: BeatsInput): Promise<string[] | null> {
+  const params = new URLSearchParams({ headline: input.headline.trim(), subline: input.subline.trim() });
+  if (input.source) {
+    params.set('source', cleanSource(input.source));
+  }
+  const url = PROXY ? `${PROXY}${PROXY.includes('?') ? '&' : '?'}mode=beats&${params}` : `http://localhost:5199/beats?${params}`;
+  const response = await fetch(url, { signal: AbortSignal.timeout(20000) });
+  if (!response.ok) {
+    return null;
+  }
+  const data = (await response.json()) as { beats?: unknown };
+  const beats = Array.isArray(data.beats) ? data.beats.map((b) => String(b).trim()).filter(Boolean) : [];
+  return beats.length ? beats : null;
+}
+
 async function fromBrowserKey(input: BeatsInput, apiKey: string): Promise<string[] | null> {
   const source = input.source ? cleanSource(input.source) : '';
   const userMessage = [
@@ -118,6 +137,17 @@ export async function draftVideoBeats(input: BeatsInput): Promise<string[]> {
     return [];
   }
 
+  // 1. Groq via the proxy (worker on the web, resolver locally).
+  try {
+    const beats = await fromProxy(input);
+    if (beats && beats.length) {
+      return beats;
+    }
+  } catch {
+    // Proxy not reachable — try Claude next.
+  }
+
+  // 2. Claude directly, if a browser key is baked in.
   const apiKey = import.meta.env.VITE_ANTHROPIC_API_KEY;
   if (apiKey) {
     try {
@@ -130,5 +160,6 @@ export async function draftVideoBeats(input: BeatsInput): Promise<string[]> {
     }
   }
 
+  // 3. Offline heuristic — always available.
   return heuristicBeats(input);
 }

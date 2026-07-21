@@ -34,6 +34,26 @@ MESSAGES_URL = "https://api.anthropic.com/v1/messages"
 # Text-to-speech defaults (overridable in secrets.json).
 DEFAULT_GOOGLE_VOICE = "en-GB-Neural2-B"
 DEFAULT_ELEVEN_VOICE = "cjVigY5qzO86Huf0OWal"  # ElevenLabs "Eric" — premade, usable on the free tier
+DEFAULT_GROQ_TTS_MODEL = "canopylabs/orpheus-v1-english"  # Groq Orpheus TTS (needs one-time terms acceptance)
+DEFAULT_GROQ_TTS_VOICE = "tara"
+DEFAULT_GROQ_LLM_MODEL = "llama-3.3-70b-versatile"
+
+# System prompt for drafting the video script (the [LABEL] beats the video speaks).
+BEATS_SYSTEM_PROMPT = (
+    "You write the spoken script for a short news video for GreaterNews, a Ghana-first news channel.\n"
+    "You are given a news card: a headline plus one or two sentences of context.\n"
+    "The headline is spoken first as the hook and a closing line is added automatically - do NOT\n"
+    "repeat either. Write the MIDDLE beats: 3 to 4 lines a presenter would say, each building on the\n"
+    "last so the story flows.\n\n"
+    "Rules:\n"
+    "- Each beat is ONE spoken-style sentence, max ~14 words.\n"
+    "- Use ONLY facts present in the headline/context. Never invent names, numbers, quotes or outcomes.\n"
+    "- No hashtags, no emojis, no timestamps, no stage directions.\n"
+    "- Prefix each beat with a short ALL-CAPS section label in square brackets, e.g. [THE STORY],\n"
+    "  [THE DETAIL], [WHO], [WHY IT MATTERS], [WHAT'S NEXT], [THE SOURCE].\n"
+    "- If the context is thin, write fewer beats rather than padding with filler.\n"
+    "Respond with JSON only: {\"beats\": [\"[LABEL] sentence\", ...]}."
+)
 
 SYSTEM_PROMPT = (
     "You help a Ghana-first news channel (GreaterNews) find a LICENSED photo for a news card.\n"
@@ -147,20 +167,74 @@ def elevenlabs_tts(text, key, voice_id):
     return response.content
 
 
-# Returns (audio_bytes, None) on success, or (None, error_message) if the key is missing.
+def groq_tts(text, key, model, voice):
+    response = requests.post(
+        "https://api.groq.com/openai/v1/audio/speech",
+        headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+        json={"model": model, "input": text, "voice": voice, "response_format": "wav"},
+        timeout=60,
+    )
+    response.raise_for_status()
+    return response.content
+
+
+# Returns (audio_bytes, content_type, None) on success, or (None, None, error_message) on failure.
 def synthesize(text, voice):
     secrets = load_secrets_dict()
     if voice == "elevenlabs":
         conf = secrets.get("elevenlabs", {})
         key = conf.get("api_key") or os.environ.get("ELEVENLABS_API_KEY")
         if not key:
-            return None, "no elevenlabs.api_key in secrets.json"
-        return elevenlabs_tts(text, key, conf.get("voice_id") or DEFAULT_ELEVEN_VOICE), None
+            return None, None, "no elevenlabs.api_key in secrets.json"
+        return elevenlabs_tts(text, key, conf.get("voice_id") or DEFAULT_ELEVEN_VOICE), "audio/mpeg", None
+    if voice == "groq":
+        conf = secrets.get("groq", {})
+        key = conf.get("api_key") or os.environ.get("GROQ_API_KEY")
+        if not key:
+            return None, None, "no groq.api_key in secrets.json"
+        model = conf.get("tts_model") or DEFAULT_GROQ_TTS_MODEL
+        return groq_tts(text, key, model, conf.get("tts_voice") or DEFAULT_GROQ_TTS_VOICE), "audio/wav", None
     conf = secrets.get("google_tts", {})
     key = conf.get("api_key") or os.environ.get("GOOGLE_TTS_API_KEY")
     if not key:
-        return None, "no google_tts.api_key in secrets.json"
-    return google_tts(text, key, conf.get("voice") or DEFAULT_GOOGLE_VOICE), None
+        return None, None, "no google_tts.api_key in secrets.json"
+    return google_tts(text, key, conf.get("voice") or DEFAULT_GOOGLE_VOICE), "audio/mpeg", None
+
+
+def groq_beats(headline, subline, source):
+    secrets = load_secrets_dict()
+    conf = secrets.get("groq", {})
+    key = conf.get("api_key") or os.environ.get("GROQ_API_KEY")
+    if not key:
+        return None, "no groq.api_key in secrets.json"
+    user = "\n".join(
+        part
+        for part in [
+            f"Headline (the hook - do NOT repeat): {headline}",
+            f"Context: {subline}" if subline else "",
+            f"Source: {source}" if source else "",
+        ]
+        if part
+    )
+    response = requests.post(
+        "https://api.groq.com/openai/v1/chat/completions",
+        headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+        json={
+            "model": conf.get("llm_model") or DEFAULT_GROQ_LLM_MODEL,
+            "temperature": 0.4,
+            "max_tokens": 400,
+            "response_format": {"type": "json_object"},
+            "messages": [
+                {"role": "system", "content": BEATS_SYSTEM_PROMPT},
+                {"role": "user", "content": user},
+            ],
+        },
+        timeout=30,
+    )
+    response.raise_for_status()
+    content = response.json()["choices"][0]["message"]["content"]
+    beats = json.loads(content).get("beats", [])
+    return [str(b).strip() for b in beats if str(b).strip()], None
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -199,14 +273,34 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(400, {"error": "missing text"})
                 return
             try:
-                audio, error = synthesize(text[:2000], voice)
+                audio, content_type, error = synthesize(text[:2000], voice)
                 if error:
                     self._send(503, {"error": error})
                     return
                 print(f"  voiceover ({voice}): {len(audio) // 1024} KB for '{text[:50]}...'")
-                self._send_bytes(200, "audio/mpeg", audio)
+                self._send_bytes(200, content_type, audio)
             except Exception as error:
                 print(f"  tts failed ({voice}): {error}")
+                self._send(500, {"error": str(error)[:200]})
+            return
+
+        if parsed.path == "/beats":
+            params = urllib.parse.parse_qs(parsed.query)
+            headline = (params.get("headline", [""])[0]).strip()
+            subline = (params.get("subline", [""])[0]).strip()
+            source = (params.get("source", [""])[0]).strip()
+            if not headline and not subline:
+                self._send(400, {"error": "missing headline/subline"})
+                return
+            try:
+                beats, error = groq_beats(headline[:600], subline[:1200], source[:120])
+                if error:
+                    self._send(503, {"error": error})
+                    return
+                print(f"  beats: {len(beats)} lines for '{headline[:50]}...'")
+                self._send(200, {"beats": beats})
+            except Exception as error:
+                print(f"  beats failed: {error}")
                 self._send(500, {"error": str(error)[:200]})
             return
 
