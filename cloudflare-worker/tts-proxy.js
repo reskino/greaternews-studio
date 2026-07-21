@@ -179,6 +179,7 @@ export default {
       return json(400, { error: 'missing text' });
     }
     const voice = (url.searchParams.get('voice') || 'elevenlabs').trim();
+    const voiceName = (url.searchParams.get('name') || '').trim();
 
     if (voice === 'groq') {
       if (!env.GROQ_API_KEY) {
@@ -190,7 +191,7 @@ export default {
         body: JSON.stringify({
           model: env.GROQ_TTS_MODEL || 'canopylabs/orpheus-v1-english',
           input: text,
-          voice: env.GROQ_TTS_VOICE || 'diana',
+          voice: voiceName || env.GROQ_TTS_VOICE || 'diana',
           response_format: 'wav',
         }),
       });

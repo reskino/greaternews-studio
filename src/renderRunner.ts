@@ -36,6 +36,7 @@ type CardSpec = {
   motion?: 'subtle' | 'dynamic' | 'minimal';
   sound?: 'none' | 'newsroom' | 'uplift' | 'calm';
   voice?: 'none' | 'google' | 'elevenlabs' | 'groq';
+  voiceName?: string;
 };
 
 type RenderSpec = {
@@ -191,7 +192,7 @@ async function run() {
           );
         }
         try {
-          const { blob, extension } = await withTimeout(exportCardVideo({ ...options, format: 'story' }, { scenes: card.scenes ?? [], narration: card.narration, beatPhotos, motion: card.motion, sound: card.sound, voice: card.voice }), 90_000);
+          const { blob, extension } = await withTimeout(exportCardVideo({ ...options, format: 'story' }, { scenes: card.scenes ?? [], narration: card.narration, beatPhotos, motion: card.motion, sound: card.sound, voice: card.voice, voiceName: card.voiceName }), 90_000);
           await upload(`${card.slug}_9x16.${extension}`, blob);
           rendered += 1;
           log(`✓ ${card.slug}_9x16.${extension} (${Math.round(blob.size / 1024)} KB)`, 'ok');

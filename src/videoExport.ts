@@ -23,6 +23,7 @@ export type VideoConfig = {
   motion?: VideoMotion;
   sound?: VideoSound;
   voice?: VideoVoice;
+  voiceName?: string; // specific voice within the engine (e.g. a Groq/Orpheus voice)
 };
 
 type MotionSpec = { zoom: number; transition: 'crossfade' | 'slide' | 'cut'; transitionMs: number };
@@ -83,8 +84,9 @@ function voiceoverText(options: CardOptions, scenes: string[], narration?: strin
 
 // Fetch narration and decode it to a 48k AudioBuffer. No live AudioContext needed — an
 // OfflineAudioContext decodes and resamples, which also works in headless renders.
-async function fetchVoiceover(voice: VideoVoice, text: string): Promise<AudioBuffer | null> {
-  const response = await fetch(`${TTS_URL}?voice=${voice}&text=${encodeURIComponent(text)}`, { signal: AbortSignal.timeout(60000) });
+async function fetchVoiceover(voice: VideoVoice, text: string, voiceName?: string): Promise<AudioBuffer | null> {
+  const nameParam = voiceName ? `&name=${encodeURIComponent(voiceName)}` : '';
+  const response = await fetch(`${TTS_URL}?voice=${voice}${nameParam}&text=${encodeURIComponent(text)}`, { signal: AbortSignal.timeout(60000) });
   if (!response.ok) {
     return null;
   }
@@ -444,7 +446,7 @@ export async function exportCardVideo(
   let voiceBuffer: AudioBuffer | null = null;
   if (voice !== 'none') {
     try {
-      voiceBuffer = await fetchVoiceover(voice, voiceoverText(options, scenes, config.narration));
+      voiceBuffer = await fetchVoiceover(voice, voiceoverText(options, scenes, config.narration), config.voiceName);
     } catch {
       voiceBuffer = null;
     }

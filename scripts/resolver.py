@@ -239,21 +239,22 @@ def groq_tts(text, key, model, voice):
 
 
 # Returns (audio_bytes, content_type, None) on success, or (None, None, error_message) on failure.
-def synthesize(text, voice):
+# `name` optionally overrides the specific voice within the engine (e.g. a Groq/Orpheus voice).
+def synthesize(text, voice, name=""):
     secrets = load_secrets_dict()
     if voice == "elevenlabs":
         conf = secrets.get("elevenlabs", {})
         key = conf.get("api_key") or os.environ.get("ELEVENLABS_API_KEY")
         if not key:
             return None, None, "no elevenlabs.api_key in secrets.json"
-        return elevenlabs_tts(text, key, conf.get("voice_id") or DEFAULT_ELEVEN_VOICE), "audio/mpeg", None
+        return elevenlabs_tts(text, key, name or conf.get("voice_id") or DEFAULT_ELEVEN_VOICE), "audio/mpeg", None
     if voice == "groq":
         conf = secrets.get("groq", {})
         key = conf.get("api_key") or os.environ.get("GROQ_API_KEY")
         if not key:
             return None, None, "no groq.api_key in secrets.json"
         model = conf.get("tts_model") or DEFAULT_GROQ_TTS_MODEL
-        return groq_tts(text, key, model, conf.get("tts_voice") or DEFAULT_GROQ_TTS_VOICE), "audio/wav", None
+        return groq_tts(text, key, model, name or conf.get("tts_voice") or DEFAULT_GROQ_TTS_VOICE), "audio/wav", None
     conf = secrets.get("google_tts", {})
     key = conf.get("api_key") or os.environ.get("GOOGLE_TTS_API_KEY")
     if not key:
@@ -353,11 +354,12 @@ class Handler(BaseHTTPRequestHandler):
             params = urllib.parse.parse_qs(parsed.query)
             text = (params.get("text", [""])[0]).strip()
             voice = (params.get("voice", ["google"])[0]).strip()
+            name = (params.get("name", [""])[0]).strip()
             if not text:
                 self._send(400, {"error": "missing text"})
                 return
             try:
-                audio, content_type, error = synthesize(text[:2000], voice)
+                audio, content_type, error = synthesize(text[:2000], voice, name)
                 if error:
                     self._send(503, {"error": error})
                     return

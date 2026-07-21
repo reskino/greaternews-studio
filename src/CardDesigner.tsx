@@ -93,6 +93,7 @@ export default function CardDesigner({
   const [videoMotion, setVideoMotion] = useState<VideoMotion>('subtle');
   const [videoSound, setVideoSound] = useState<VideoSound>('newsroom');
   const [videoVoice, setVideoVoice] = useState<VideoVoice>('none');
+  const [groqVoiceName, setGroqVoiceName] = useState('hannah'); // Orpheus voice when videoVoice==='groq'
   const [format, setFormat] = useState<CardFormat>('portrait');
   const [photo, setPhoto] = useState<HTMLImageElement | null>(null);
   const [photoName, setPhotoName] = useState('');
@@ -452,7 +453,7 @@ export default function CardDesigner({
     try {
       const { blob, extension } = await exportCardVideo(
         { template, format, photo, logo, headline, subline, highlight, attribution, chip, statValue, postHandle, postMeta, footer, handle, accent, dim, headlineShift: textShift },
-        { scenes: videoBeats.split('\n').map((beat) => beat.trim()).filter(Boolean), narration: videoNarration.split('\n').map((line) => line.trim()).filter(Boolean), beatPhotos: beatImages, motion: videoMotion, sound: videoSound, voice: videoVoice },
+        { scenes: videoBeats.split('\n').map((beat) => beat.trim()).filter(Boolean), narration: videoNarration.split('\n').map((line) => line.trim()).filter(Boolean), beatPhotos: beatImages, motion: videoMotion, sound: videoSound, voice: videoVoice, voiceName: videoVoice === 'groq' ? groqVoiceName : undefined },
         (progress) => setVideoProgress(progress),
       );
       const url = URL.createObjectURL(blob);
@@ -872,15 +873,30 @@ export default function CardDesigner({
               </select>
             </label>
           </div>
-          <label>
-            <span>Voiceover</span>
-            <select value={videoVoice} onChange={(event) => setVideoVoice(event.target.value as VideoVoice)}>
-              <option value="none">None (music only)</option>
-              <option value="groq">Groq (Orpheus) — free, natural</option>
-              <option value="elevenlabs">ElevenLabs — most human (needs plan for commercial)</option>
-              <option value="google">Google voice — needs billing enabled</option>
-            </select>
-          </label>
+          <div className="field-grid">
+            <label>
+              <span>Voiceover</span>
+              <select value={videoVoice} onChange={(event) => setVideoVoice(event.target.value as VideoVoice)}>
+                <option value="none">None (music only)</option>
+                <option value="groq">Groq (Orpheus) — free, natural</option>
+                <option value="elevenlabs">ElevenLabs — most human (needs plan for commercial)</option>
+                <option value="google">Google voice — needs billing enabled</option>
+              </select>
+            </label>
+            {videoVoice === 'groq' ? (
+              <label>
+                <span>Groq voice</span>
+                <select value={groqVoiceName} onChange={(event) => setGroqVoiceName(event.target.value)}>
+                  <option value="hannah">Hannah (female)</option>
+                  <option value="autumn">Autumn (female)</option>
+                  <option value="diana">Diana (female)</option>
+                  <option value="austin">Austin (male)</option>
+                  <option value="daniel">Daniel (male)</option>
+                  <option value="troy">Troy (male)</option>
+                </select>
+              </label>
+            ) : null}
+          </div>
 
           <div className="designer-actions">
             <button type="button" className="secondary" onClick={useSelectedStory}>
