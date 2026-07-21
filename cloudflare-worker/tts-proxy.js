@@ -3,13 +3,15 @@
 //
 // Deploy (Cloudflare dashboard → Workers & Pages → your Worker → Edit code → paste this → Deploy):
 //   Settings → Variables and Secrets:
-//     ELEVEN_API_KEY   (Secret)   your ElevenLabs key (sk_...)
-//     ELEVEN_VOICE_ID  (Text)     cjVigY5qzO86Huf0OWal   (or any premade voice id)
-//     GROQ_API_KEY     (Secret)   your Groq key (gsk_...)     — for the free Groq voice + beat drafting
-//     GROQ_TTS_MODEL   (Text)     canopylabs/orpheus-v1-english   (optional; this is the default)
-//     GROQ_TTS_VOICE   (Text)     tara                            (optional; this is the default)
-//     GROQ_LLM_MODEL   (Text)     llama-3.3-70b-versatile         (optional; this is the default)
-//     ALLOWED_ORIGIN   (Text)     https://reskino.github.io
+//     ELEVEN_API_KEY    (Secret)  your ElevenLabs key (sk_...)
+//     ELEVEN_VOICE_ID   (Text)    cjVigY5qzO86Huf0OWal   (or any premade voice id)
+//     ANTHROPIC_API_KEY (Secret)  your Anthropic key (sk-ant-...) — primary drafter for the script
+//     ANTHROPIC_MODEL   (Text)    claude-opus-4-8         (optional; e.g. claude-sonnet-5 is cheaper)
+//     GROQ_API_KEY      (Secret)  your Groq key (gsk_...) — free Groq voice + the beats backup
+//     GROQ_TTS_MODEL    (Text)    canopylabs/orpheus-v1-english   (optional; this is the default)
+//     GROQ_TTS_VOICE    (Text)    tara                            (optional; this is the default)
+//     GROQ_LLM_MODEL    (Text)    llama-3.3-70b-versatile         (optional; this is the default)
+//     ALLOWED_ORIGIN    (Text)    https://reskino.github.io
 //   NOTE: the Groq voice (Orpheus) needs a one-time terms acceptance by the org admin at
 //   https://console.groq.com/playground?model=canopylabs/orpheus-v1-english before it will work.
 //
@@ -39,6 +41,78 @@ const GROQ_BEATS_SYSTEM = [
   'Respond with JSON only: {"scenes":[{"label":"","caption":"","say":"","image":""}]}',
 ].join('\n');
 
+const BEATS_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    scenes: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        properties: { label: { type: 'string' }, caption: { type: 'string' }, say: { type: 'string' }, image: { type: 'string' } },
+        required: ['label', 'caption', 'say', 'image'],
+      },
+    },
+  },
+  required: ['scenes'],
+};
+
+// Keep only well-formed scenes and trim their fields.
+function normalizeScenes(scenes) {
+  return Array.isArray(scenes)
+    ? scenes
+        .filter((s) => s && (String(s.caption || '').trim() || String(s.say || '').trim()))
+        .map((s) => ({
+          label: String(s.label || '').trim(),
+          caption: String(s.caption || '').trim(),
+          say: String(s.say || '').trim(),
+          image: String(s.image || '').trim(),
+        }))
+    : [];
+}
+
+// Draft via Claude (structured output). Throws on any failure so the caller can fall back to Groq.
+async function claudeBeats(env, userMessage) {
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-api-key': env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' },
+    body: JSON.stringify({
+      model: env.ANTHROPIC_MODEL || 'claude-opus-4-8',
+      max_tokens: 900,
+      output_config: { effort: 'low', format: { type: 'json_schema', schema: BEATS_SCHEMA } },
+      system: GROQ_BEATS_SYSTEM,
+      messages: [{ role: 'user', content: userMessage }],
+    }),
+  });
+  if (!response.ok) {
+    throw new Error(`claude ${response.status}`);
+  }
+  const data = await response.json();
+  const text = (data.content || []).find((b) => b.type === 'text')?.text || '{}';
+  return normalizeScenes(JSON.parse(text).scenes);
+}
+
+// Draft via Groq (JSON mode). Throws on failure.
+async function groqBeats(env, userMessage) {
+  const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${env.GROQ_API_KEY}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: env.GROQ_LLM_MODEL || 'llama-3.3-70b-versatile',
+      temperature: 0.4,
+      max_tokens: 900,
+      response_format: { type: 'json_object' },
+      messages: [{ role: 'system', content: GROQ_BEATS_SYSTEM }, { role: 'user', content: userMessage }],
+    }),
+  });
+  if (!response.ok) {
+    throw new Error(`groq ${response.status}`);
+  }
+  const data = await response.json();
+  return normalizeScenes(JSON.parse(data.choices?.[0]?.message?.content || '{}').scenes);
+}
+
 export default {
   async fetch(request, env) {
     const origin = request.headers.get('Origin') || '';
@@ -62,10 +136,10 @@ export default {
     const url = new URL(request.url);
     const mode = url.searchParams.get('mode') || 'tts';
 
-    // ---- Draft video beats (Groq LLM) ----
+    // ---- Draft video beats: Claude first (best writing), Groq as backup ----
     if (mode === 'beats') {
-      if (!env.GROQ_API_KEY) {
-        return json(503, { error: 'GROQ_API_KEY not set on the worker' });
+      if (!env.ANTHROPIC_API_KEY && !env.GROQ_API_KEY) {
+        return json(503, { error: 'set ANTHROPIC_API_KEY (primary) and/or GROQ_API_KEY (backup) on the worker' });
       }
       const headline = (url.searchParams.get('headline') || '').slice(0, 600).trim();
       const subline = (url.searchParams.get('subline') || '').slice(0, 1200).trim();
@@ -81,39 +155,20 @@ export default {
         source ? `Source: ${source}` : '',
       ].filter(Boolean).join('\n');
 
-      const upstream = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${env.GROQ_API_KEY}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: env.GROQ_LLM_MODEL || 'llama-3.3-70b-versatile',
-          temperature: 0.4,
-          max_tokens: 900,
-          response_format: { type: 'json_object' },
-          messages: [
-            { role: 'system', content: GROQ_BEATS_SYSTEM },
-            { role: 'user', content: userMessage },
-          ],
-        }),
-      });
-      if (!upstream.ok) {
-        return json(502, { error: 'beats failed', status: upstream.status, detail: (await upstream.text()).slice(0, 300) });
-      }
-      const data = await upstream.json();
       let scenes = [];
-      try {
-        const parsed = JSON.parse(data.choices?.[0]?.message?.content || '{}');
-        scenes = Array.isArray(parsed.scenes)
-          ? parsed.scenes
-              .filter((s) => s && (String(s.caption || '').trim() || String(s.say || '').trim()))
-              .map((s) => ({
-                label: String(s.label || '').trim(),
-                caption: String(s.caption || '').trim(),
-                say: String(s.say || '').trim(),
-                image: String(s.image || '').trim(),
-              }))
-          : [];
-      } catch {
-        scenes = [];
+      if (env.ANTHROPIC_API_KEY) {
+        try {
+          scenes = await claudeBeats(env, userMessage);
+        } catch {
+          // Claude failed — fall through to the Groq backup.
+        }
+      }
+      if (!scenes.length && env.GROQ_API_KEY) {
+        try {
+          scenes = await groqBeats(env, userMessage);
+        } catch {
+          scenes = [];
+        }
       }
       return json(200, { scenes });
     }

@@ -60,6 +60,61 @@ BEATS_SYSTEM_PROMPT = (
     "Respond with JSON only: {\"scenes\":[{\"label\":\"\",\"caption\":\"\",\"say\":\"\",\"image\":\"\"}]}"
 )
 
+BEATS_JSON_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "scenes": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "label": {"type": "string"},
+                    "caption": {"type": "string"},
+                    "say": {"type": "string"},
+                    "image": {"type": "string"},
+                },
+                "required": ["label", "caption", "say", "image"],
+            },
+        },
+    },
+    "required": ["scenes"],
+}
+
+
+def clean_scenes(scenes):
+    clean = []
+    for scene in scenes or []:
+        if not isinstance(scene, dict):
+            continue
+        caption = str(scene.get("caption", "")).strip()
+        say = str(scene.get("say", "")).strip()
+        if not caption and not say:
+            continue
+        clean.append(
+            {
+                "label": str(scene.get("label", "")).strip(),
+                "caption": caption,
+                "say": say,
+                "image": str(scene.get("image", "")).strip(),
+            }
+        )
+    return clean
+
+
+def beats_user_message(headline, subline, details, source):
+    return "\n".join(
+        part
+        for part in [
+            f"Headline (the hook - do NOT repeat): {headline}",
+            f"Context: {subline}" if subline else "",
+            f"Story details:\n{details}" if details else "",
+            f"Source: {source}" if source else "",
+        ]
+        if part
+    )
+
 SYSTEM_PROMPT = (
     "You help a Ghana-first news channel (GreaterNews) find a LICENSED photo for a news card.\n"
     "The user types a short image-search query. Turn it into a disambiguated search plan for\n"
@@ -206,22 +261,31 @@ def synthesize(text, voice):
     return google_tts(text, key, conf.get("voice") or DEFAULT_GOOGLE_VOICE), "audio/mpeg", None
 
 
+def claude_beats(api_key, headline, subline, details, source):
+    response = requests.post(
+        MESSAGES_URL,
+        headers={"x-api-key": api_key, "anthropic-version": "2023-06-01", "content-type": "application/json"},
+        json={
+            "model": MODEL,
+            "max_tokens": 900,
+            "output_config": {"effort": "low", "format": {"type": "json_schema", "schema": BEATS_JSON_SCHEMA}},
+            "system": BEATS_SYSTEM_PROMPT,
+            "messages": [{"role": "user", "content": beats_user_message(headline, subline, details, source)}],
+        },
+        timeout=40,
+    )
+    response.raise_for_status()
+    data = response.json()
+    text = next((b.get("text") for b in data.get("content", []) if b.get("type") == "text"), None)
+    return clean_scenes(json.loads(text).get("scenes", []) if text else [])
+
+
 def groq_beats(headline, subline, details, source):
     secrets = load_secrets_dict()
     conf = secrets.get("groq", {})
     key = conf.get("api_key") or os.environ.get("GROQ_API_KEY")
     if not key:
-        return None, "no groq.api_key in secrets.json"
-    user = "\n".join(
-        part
-        for part in [
-            f"Headline (the hook - do NOT repeat): {headline}",
-            f"Context: {subline}" if subline else "",
-            f"Story details:\n{details}" if details else "",
-            f"Source: {source}" if source else "",
-        ]
-        if part
-    )
+        raise ValueError("no groq.api_key in secrets.json")
     response = requests.post(
         "https://api.groq.com/openai/v1/chat/completions",
         headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
@@ -232,31 +296,29 @@ def groq_beats(headline, subline, details, source):
             "response_format": {"type": "json_object"},
             "messages": [
                 {"role": "system", "content": BEATS_SYSTEM_PROMPT},
-                {"role": "user", "content": user},
+                {"role": "user", "content": beats_user_message(headline, subline, details, source)},
             ],
         },
         timeout=30,
     )
     response.raise_for_status()
-    content = response.json()["choices"][0]["message"]["content"]
-    scenes = json.loads(content).get("scenes", [])
-    clean = []
-    for scene in scenes:
-        if not isinstance(scene, dict):
-            continue
-        caption = str(scene.get("caption", "")).strip()
-        say = str(scene.get("say", "")).strip()
-        if not caption and not say:
-            continue
-        clean.append(
-            {
-                "label": str(scene.get("label", "")).strip(),
-                "caption": caption,
-                "say": say,
-                "image": str(scene.get("image", "")).strip(),
-            }
-        )
-    return clean, None
+    return clean_scenes(json.loads(response.json()["choices"][0]["message"]["content"]).get("scenes", []))
+
+
+# Draft the beats: Claude first (best writing), Groq as backup. Returns (scenes, error).
+def draft_beats(headline, subline, details, source):
+    api_key = load_api_key()
+    if api_key:
+        try:
+            scenes = claude_beats(api_key, headline, subline, details, source)
+            if scenes:
+                return scenes, None
+        except Exception as error:
+            print(f"  beats: claude failed ({str(error)[:80]}); trying groq")
+    try:
+        return groq_beats(headline, subline, details, source), None
+    except Exception as error:
+        return None, str(error)[:200]
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -316,7 +378,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(400, {"error": "missing headline/subline"})
                 return
             try:
-                scenes, error = groq_beats(headline[:600], subline[:1200], details[:4000], source[:120])
+                scenes, error = draft_beats(headline[:600], subline[:1200], details[:4000], source[:120])
                 if error:
                     self._send(503, {"error": error})
                     return
