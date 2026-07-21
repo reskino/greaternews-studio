@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import type { CardFormat, CardTemplate, ChipLabel } from './cardEngine';
 import { drawCard, formatSizes, templateMeta } from './cardEngine';
-import type { ImageResult } from './imageSearch';
-import { dedupeResults, findStoryImages, loadImage, loadImageWithProxyFallback, searchCommons, searchOpenverse } from './imageSearch';
+import type { ImageResult, SearchPlan } from './imageSearch';
+import { buildHeuristicPlan, dedupeResults, filterByExcludeTerms, findStoryImages, loadImage, loadImageWithProxyFallback, searchCommons, searchOpenverse, searchWikipediaImages } from './imageSearch';
+import { resolveQuery } from './aiResolver';
 import { exportCardVideo, videoExportSupported } from './videoExport';
 
 type CardDesignerProps = {
@@ -88,6 +89,7 @@ export default function CardDesigner({
   const [results, setResults] = useState<ImageResult[]>([]);
   const [storyQueries, setStoryQueries] = useState<string[]>([]);
   const [loadingImageId, setLoadingImageId] = useState('');
+  const [plan, setPlan] = useState<SearchPlan | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -163,34 +165,55 @@ export default function CardDesigner({
     image.src = url;
   }
 
-  async function executeSearch(queries: string[]) {
+  // Core search: fetch every query across all sources, dedupe, drop wrong-country/entity
+  // matches, cap at 18. Wikipedia lead images are the best hit for a named person; Commons
+  // and Openverse cover places, organisations, and concepts.
+  async function runQueries(queries: string[], excludeTerms: string[] = []) {
+    const settled = await Promise.allSettled(
+      queries.flatMap((term) => [searchWikipediaImages(term), searchCommons(term), searchOpenverse(term)]),
+    );
+    const deduped = dedupeResults(settled.flatMap((result) => (result.status === 'fulfilled' ? result.value : [])));
+    const found = filterByExcludeTerms(deduped, excludeTerms).slice(0, 18);
+    setResults(found);
+    const allRejected = settled.every((result) => result.status === 'rejected');
+    if (found.length === 0) {
+      setSearchError(
+        allRejected
+          ? 'Image search is unreachable right now. Check the connection and try again.'
+          : 'No images found for that search. Try fewer or broader words, or upload your own photo.',
+      );
+    }
+    return found;
+  }
+
+  async function executeSearch(queries: string[], excludeTerms: string[] = []) {
     if (queries.length === 0 || searching) {
       return;
     }
-
     setSearching(true);
     setSearchError('');
     setResults([]);
-
-    const settled = await Promise.allSettled(queries.flatMap((term) => [searchCommons(term), searchOpenverse(term)]));
-    const found = dedupeResults(settled.flatMap((result) => (result.status === 'fulfilled' ? result.value : []))).slice(0, 18);
-
-    setResults(found);
-    if (found.length === 0) {
-      setSearchError(
-        settled.every((result) => result.status === 'rejected')
-          ? 'Image search is unreachable right now. Check the connection and try again.'
-          : 'No images found for that search. Try fewer or broader words.',
-      );
-    }
+    await runQueries(queries, excludeTerms);
     setSearching(false);
   }
 
+  // Manual search: let Claude disambiguate the query (Ghana-aware, "<org> role" savvy),
+  // falling back to the key-free heuristic, then search the resolved plan's queries.
   async function runImageSearch() {
     const trimmed = query.trim();
-    if (trimmed) {
-      await executeSearch([trimmed]);
+    if (!trimmed || searching) {
+      return;
     }
+    setSearching(true);
+    setSearchError('');
+    setResults([]);
+    setPlan(null);
+
+    const resolved = (await resolveQuery(trimmed, suggestedHeadline).catch(() => null)) ?? buildHeuristicPlan(trimmed);
+    setPlan(resolved);
+    setStoryQueries(resolved.searchQueries);
+    await runQueries(resolved.searchQueries, resolved.excludeTerms);
+    setSearching(false);
   }
 
   async function findImagesForStory() {
@@ -452,6 +475,13 @@ export default function CardDesigner({
                 </button>
               ))}
             </div>
+          ) : null}
+
+          {plan ? (
+            <p className="designer-note">
+              {plan.source === 'ai' ? '✦ ' : ''}Read “{plan.raw}” as: <strong>{plan.interpretation}</strong>
+              {plan.sensitive ? ' · sensitive story — avoid a person photo' : ''}
+            </p>
           ) : null}
 
           {searchError ? <p className="designer-note danger-note">{searchError}</p> : null}

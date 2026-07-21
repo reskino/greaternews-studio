@@ -2,5 +2,7 @@ node_modules/
 dist/
 __pycache__/
 greaternews-studio-site.zip
+.env
+.env.local
 content/*/assets/
 secrets.json

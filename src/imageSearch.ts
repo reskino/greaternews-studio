@@ -74,7 +74,136 @@ const ghanaAcronyms: Record<string, string> = {
   ecowas: 'Economic Community of West African States',
   au: 'African Union',
   imf: 'International Monetary Fund',
+  // Authorities, ministries, and public bodies frequently named in Ghana news.
+  dvla: 'Driver and Vehicle Licensing Authority Ghana',
+  gis: 'Ghana Immigration Service',
+  gps: 'Ghana Police Service',
+  gaf: 'Ghana Armed Forces',
+  gnfs: 'Ghana National Fire Service',
+  gpha: 'Ghana Ports and Harbours Authority',
+  gwcl: 'Ghana Water Company Limited',
+  vra: 'Volta River Authority',
+  ssnit: 'Social Security and National Insurance Trust',
+  nhia: 'National Health Insurance Authority Ghana',
+  nhis: 'National Health Insurance Scheme Ghana',
+  eoco: 'Economic and Organised Crime Office Ghana',
+  gtec: 'Ghana Tertiary Education Commission',
+  gse: 'Ghana Stock Exchange',
+  gcb: 'GCB Bank Ghana',
+  fda: 'Food and Drugs Authority Ghana',
+  gsa: 'Ghana Standards Authority',
+  nia: 'National Identification Authority Ghana',
+  ug: 'University of Ghana',
+  ucc: 'University of Cape Coast',
+  moh: 'Ministry of Health Ghana',
+  mof: 'Ministry of Finance Ghana',
+  moe: 'Ministry of Education Ghana',
 };
+
+// Titles that mean "the person who leads <org>" — the query wants a face, but a free
+// photo of a current Ghanaian office-holder rarely exists, so we depict the org instead.
+const roleWords = new Set([
+  'ceo', 'boss', 'md', 'director', 'director-general', 'dg', 'head', 'chief', 'executive',
+  'minister', 'president', 'chairman', 'chairperson', 'chair', 'governor', 'commissioner',
+  'administrator', 'mp', 'igp', 'gm', 'ag', 'spokesperson',
+]);
+
+// Acronyms that collide with a better-known foreign body — when the Ghana reading is meant,
+// these terms in a result mean it's the wrong one and should be filtered out.
+const acronymClashes: Record<string, string[]> = {
+  dvla: ['Swansea', 'Dundee', 'United Kingdom', 'England', 'Wales', 'British', 'DVLA.gov.uk'],
+  fda: ['United States', 'U.S.', 'Silver Spring', 'Maryland', 'FDA.gov'],
+  gps: ['satellite', 'navigation', 'Global Positioning'],
+};
+
+const sensitiveMarkers = /\b(dead|death|died|killed|murder|rape|raped|victim|accident|suicide|corpse|bodies|body|minor|abuse)s?\b/i;
+
+// A disambiguated, Ghana-aware plan for finding a licensed photo. Produced either by the
+// Claude resolver (aiResolver.ts) or the key-free heuristic below; both feed the same search.
+export type SearchPlan = {
+  raw: string;
+  interpretation: string;
+  entity: string;
+  person: string;
+  country: string;
+  searchQueries: string[];
+  excludeTerms: string[];
+  sensitive: boolean;
+  source: 'ai' | 'heuristic';
+};
+
+// Key-free query understanding: expand Ghana acronyms, recognise "<org> <role>" queries,
+// bias to Ghana, and flag the wrong-country matches to filter. Always available; also the
+// fallback when the Claude resolver isn't reachable.
+export function buildHeuristicPlan(query: string): SearchPlan {
+  const raw = query.trim();
+  const tokens = raw.split(/\s+/).filter(Boolean);
+  const expand = (token: string) => ghanaAcronyms[token.toLowerCase()] ?? token;
+
+  const roleIndex = tokens.findIndex((token) => roleWords.has(token.toLowerCase()));
+  const hasRole = roleIndex > 0; // a leading role word (e.g. "President Mahama") is a name, not "<org> role"
+  const orgTokens = hasRole ? tokens.slice(0, roleIndex) : tokens;
+  const orgExpanded = orgTokens.map(expand).join(' ').trim();
+  const orgRaw = orgTokens.join(' ').trim();
+
+  const knownGhana = ghanaMarkers.test(raw) || orgTokens.some((token) => ghanaAcronyms[token.toLowerCase()]);
+  const country = knownGhana ? 'Ghana' : '';
+  const entity = orgExpanded || raw;
+
+  const queries: string[] = [];
+  const push = (candidate: string) => {
+    const trimmed = candidate.trim();
+    if (trimmed && !queries.includes(trimmed)) {
+      queries.push(trimmed);
+    }
+  };
+
+  if (hasRole) {
+    push(orgExpanded);
+    if (country && !orgExpanded.includes('Ghana')) push(`${orgExpanded} ${country}`);
+    push(`${orgExpanded} headquarters`);
+    push(`${orgExpanded} logo`);
+  } else {
+    push(orgExpanded);
+    if (country && !orgExpanded.includes('Ghana')) push(`${orgExpanded} ${country}`);
+  }
+  if (orgRaw && orgRaw !== orgExpanded) push(orgRaw);
+
+  const excludeTerms: string[] = [];
+  for (const token of orgTokens) {
+    const clash = acronymClashes[token.toLowerCase()];
+    if (clash) excludeTerms.push(...clash);
+  }
+
+  const sensitive = sensitiveMarkers.test(raw);
+  const interpretation = hasRole
+    ? `${orgExpanded}${country ? ` (${country})` : ''} — showing the organisation; a free photo of the current office-holder may not exist`
+    : `${entity}${country ? ` (${country})` : ''}`;
+
+  return {
+    raw,
+    interpretation,
+    entity,
+    person: '',
+    country,
+    searchQueries: queries.length ? queries : [raw],
+    excludeTerms,
+    sensitive,
+    source: 'heuristic',
+  };
+}
+
+// Drop results whose title or author reveals a wrong-country / wrong-entity match.
+export function filterByExcludeTerms(results: ImageResult[], excludeTerms: string[]) {
+  if (excludeTerms.length === 0) {
+    return results;
+  }
+  const needles = excludeTerms.map((term) => term.toLowerCase());
+  return results.filter((result) => {
+    const haystack = `${result.title} ${result.author}`.toLowerCase();
+    return !needles.some((needle) => haystack.includes(needle));
+  });
+}
 
 // Consecutive capitalized-word runs name the people, places, and organizations in a headline.
 export function extractEntities(headline: string): string[] {
