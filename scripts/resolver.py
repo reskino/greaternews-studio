@@ -38,21 +38,26 @@ DEFAULT_GROQ_TTS_MODEL = "canopylabs/orpheus-v1-english"  # Groq Orpheus TTS (ne
 DEFAULT_GROQ_TTS_VOICE = "tara"
 DEFAULT_GROQ_LLM_MODEL = "llama-3.3-70b-versatile"
 
-# System prompt for drafting the video script (the [LABEL] beats the video speaks).
+# System prompt for drafting the video script: a short on-screen caption + a fuller spoken sentence
+# + a photo subject, per beat.
 BEATS_SYSTEM_PROMPT = (
-    "You write the spoken script for a short news video for GreaterNews, a Ghana-first news channel.\n"
-    "You are given a news card: a headline plus one or two sentences of context.\n"
-    "The headline is spoken first as the hook and a closing line is added automatically - do NOT\n"
-    "repeat either. Write the MIDDLE beats: 3 to 4 lines a presenter would say, each building on the\n"
-    "last so the story flows.\n\n"
+    "You script a short news video for GreaterNews, a Ghana-first news channel. You are given a\n"
+    "headline, one line of context, and optional longer story details. Write 4 to 6 beats that tell\n"
+    "the story in order, each building on the last.\n\n"
+    "For EACH beat return:\n"
+    "- label: a 1-3 word ALL-CAPS section tag, e.g. THE STORY, THE DETAIL, WHO, WHY IT MATTERS,\n"
+    "  WHAT'S NEXT, THE SOURCE.\n"
+    "- caption: a SHORT on-screen line for the slide, max 6 words, punchy (not a full sentence).\n"
+    "- say: what the presenter SAYS for this beat - ONE natural spoken sentence, ~18 to 28 words, that\n"
+    "  actually explains this part of the story. This is the substance: make it informative and flowing.\n"
+    "- image: a concrete, searchable photo subject to depict this beat (a person, place, building or\n"
+    "  thing), Ghana-aware; empty string if there is nothing safe/relevant to depict.\n\n"
     "Rules:\n"
-    "- Each beat is ONE spoken-style sentence, max ~14 words.\n"
-    "- Use ONLY facts present in the headline/context. Never invent names, numbers, quotes or outcomes.\n"
+    "- Use ONLY facts in the headline/context/details. Never invent names, numbers, quotes or outcomes.\n"
+    "- The headline is spoken first as the hook and a closing line is added automatically - do NOT\n"
+    "  repeat either in the beats.\n"
     "- No hashtags, no emojis, no timestamps, no stage directions.\n"
-    "- Prefix each beat with a short ALL-CAPS section label in square brackets, e.g. [THE STORY],\n"
-    "  [THE DETAIL], [WHO], [WHY IT MATTERS], [WHAT'S NEXT], [THE SOURCE].\n"
-    "- If the context is thin, write fewer beats rather than padding with filler.\n"
-    "Respond with JSON only: {\"beats\": [\"[LABEL] sentence\", ...]}."
+    "Respond with JSON only: {\"scenes\":[{\"label\":\"\",\"caption\":\"\",\"say\":\"\",\"image\":\"\"}]}"
 )
 
 SYSTEM_PROMPT = (
@@ -201,7 +206,7 @@ def synthesize(text, voice):
     return google_tts(text, key, conf.get("voice") or DEFAULT_GOOGLE_VOICE), "audio/mpeg", None
 
 
-def groq_beats(headline, subline, source):
+def groq_beats(headline, subline, details, source):
     secrets = load_secrets_dict()
     conf = secrets.get("groq", {})
     key = conf.get("api_key") or os.environ.get("GROQ_API_KEY")
@@ -212,6 +217,7 @@ def groq_beats(headline, subline, source):
         for part in [
             f"Headline (the hook - do NOT repeat): {headline}",
             f"Context: {subline}" if subline else "",
+            f"Story details:\n{details}" if details else "",
             f"Source: {source}" if source else "",
         ]
         if part
@@ -222,7 +228,7 @@ def groq_beats(headline, subline, source):
         json={
             "model": conf.get("llm_model") or DEFAULT_GROQ_LLM_MODEL,
             "temperature": 0.4,
-            "max_tokens": 400,
+            "max_tokens": 900,
             "response_format": {"type": "json_object"},
             "messages": [
                 {"role": "system", "content": BEATS_SYSTEM_PROMPT},
@@ -233,8 +239,24 @@ def groq_beats(headline, subline, source):
     )
     response.raise_for_status()
     content = response.json()["choices"][0]["message"]["content"]
-    beats = json.loads(content).get("beats", [])
-    return [str(b).strip() for b in beats if str(b).strip()], None
+    scenes = json.loads(content).get("scenes", [])
+    clean = []
+    for scene in scenes:
+        if not isinstance(scene, dict):
+            continue
+        caption = str(scene.get("caption", "")).strip()
+        say = str(scene.get("say", "")).strip()
+        if not caption and not say:
+            continue
+        clean.append(
+            {
+                "label": str(scene.get("label", "")).strip(),
+                "caption": caption,
+                "say": say,
+                "image": str(scene.get("image", "")).strip(),
+            }
+        )
+    return clean, None
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -288,17 +310,18 @@ class Handler(BaseHTTPRequestHandler):
             params = urllib.parse.parse_qs(parsed.query)
             headline = (params.get("headline", [""])[0]).strip()
             subline = (params.get("subline", [""])[0]).strip()
+            details = (params.get("details", [""])[0]).strip()
             source = (params.get("source", [""])[0]).strip()
-            if not headline and not subline:
+            if not headline and not subline and not details:
                 self._send(400, {"error": "missing headline/subline"})
                 return
             try:
-                beats, error = groq_beats(headline[:600], subline[:1200], source[:120])
+                scenes, error = groq_beats(headline[:600], subline[:1200], details[:4000], source[:120])
                 if error:
                     self._send(503, {"error": error})
                     return
-                print(f"  beats: {len(beats)} lines for '{headline[:50]}...'")
-                self._send(200, {"beats": beats})
+                print(f"  beats: {len(scenes)} scenes for '{headline[:50]}...'")
+                self._send(200, {"scenes": scenes})
             except Exception as error:
                 print(f"  beats failed: {error}")
                 self._send(500, {"error": str(error)[:200]})

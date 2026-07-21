@@ -79,8 +79,14 @@ export default function CardDesigner({
   const [accent, setAccent] = useState('#f3c457');
   const [dim, setDim] = useState(0.2);
   const [textShift, setTextShift] = useState(() => initialNumber('shift', 0));
-  // Extra story beats for the video (one per line) — turns the clip into a multi-scene story.
+  // Optional fuller story text the drafter reads to write a richer script.
+  const [storyDetails, setStoryDetails] = useState('');
+  // On-screen captions (one per line) — turns the clip into a multi-scene story.
   const [videoBeats, setVideoBeats] = useState(() => initialParam('beats', '').replace(/\s*\|\s*/g, '\n'));
+  // Fuller spoken narration (one line per beat) — what the voice reads; slides stay short.
+  const [videoNarration, setVideoNarration] = useState('');
+  // Per-beat photo subjects the drafter suggests (used by the auto-images feature).
+  const [videoImageQueries, setVideoImageQueries] = useState<string[]>([]);
   const [draftingBeats, setDraftingBeats] = useState(false);
   const [videoMotion, setVideoMotion] = useState<VideoMotion>('subtle');
   const [videoSound, setVideoSound] = useState<VideoSound>('newsroom');
@@ -366,17 +372,19 @@ export default function CardDesigner({
     if (draftingBeats) {
       return;
     }
-    if (videoBeats.trim() && !window.confirm('Replace the current video script with a fresh draft from the card?')) {
+    if ((videoBeats.trim() || videoNarration.trim()) && !window.confirm('Replace the current video script with a fresh draft from the card?')) {
       return;
     }
     setDraftingBeats(true);
     try {
-      const beats = await draftVideoBeats({ headline, subline, source: footer });
-      if (beats.length) {
-        setVideoBeats(beats.join('\n'));
+      const { captions, narration, imageQueries } = await draftVideoBeats({ headline, subline, details: storyDetails, source: footer });
+      if (captions.length) {
+        setVideoBeats(captions.join('\n'));
+        setVideoNarration(narration.join('\n'));
+        setVideoImageQueries(imageQueries);
       }
     } catch {
-      // Leave the box unchanged if drafting fails.
+      // Leave the boxes unchanged if drafting fails.
     }
     setDraftingBeats(false);
   }
@@ -390,7 +398,7 @@ export default function CardDesigner({
     try {
       const { blob, extension } = await exportCardVideo(
         { template, format, photo, logo, headline, subline, highlight, attribution, chip, statValue, postHandle, postMeta, footer, handle, accent, dim, headlineShift: textShift },
-        { scenes: videoBeats.split('\n').map((beat) => beat.trim()).filter(Boolean), motion: videoMotion, sound: videoSound, voice: videoVoice },
+        { scenes: videoBeats.split('\n').map((beat) => beat.trim()).filter(Boolean), narration: videoNarration.split('\n').map((line) => line.trim()).filter(Boolean), motion: videoMotion, sound: videoSound, voice: videoVoice },
         (progress) => setVideoProgress(progress),
       );
       const url = URL.createObjectURL(blob);
@@ -730,16 +738,34 @@ export default function CardDesigner({
 
           <label>
             <span>
-              Video script (one beat per line — optional [SECTION] label; plays as slides after the headline)
-              <button type="button" className="link-button" onClick={() => void draftBeatsFromCard()} disabled={draftingBeats || (!headline.trim() && !subline.trim())}>
+              Story details for the script (optional — paste the article or key facts so the voice can tell the full story)
+              <button type="button" className="link-button" onClick={() => void draftBeatsFromCard()} disabled={draftingBeats || (!headline.trim() && !subline.trim() && !storyDetails.trim())}>
                 {draftingBeats ? 'drafting…' : 'draft from card'}
               </button>
             </span>
             <textarea
+              value={storyDetails}
+              onChange={(event) => setStoryDetails(event.target.value)}
+              rows={4}
+              placeholder={'Paste the verified article text or the key facts here, then click “draft from card”. The more you give, the more the video can actually say.'}
+            />
+          </label>
+          <label>
+            <span>On-screen captions (one short line per slide — optional [SECTION] label)</span>
+            <textarea
               value={videoBeats}
               onChange={(event) => setVideoBeats(event.target.value)}
               rows={5}
-              placeholder={'[THE STORY] Abu Trica pleads not guilty in a US court\n[THE DETAIL] Charged over an alleged $8m romance scam\n[WHO] Prosecutors say elderly Americans were targeted\n[WHAT’S NEXT] Trial is set for September 8'}
+              placeholder={'[THE STORY] Aboagye on EOCO stop list\n[THE DETAIL] Name added without notice\n[WHO] NPP communications director\n[THE SOURCE] MyJoyOnline'}
+            />
+          </label>
+          <label>
+            <span>Voiceover narration (fuller — what the voice says; one line per caption, drafted for you)</span>
+            <textarea
+              value={videoNarration}
+              onChange={(event) => setVideoNarration(event.target.value)}
+              rows={5}
+              placeholder={'Leave blank to speak the captions. Or click “draft from card” to get a fuller, flowing narration here — the slides stay short while the voice tells the whole story.'}
             />
           </label>
           <div className="field-grid">

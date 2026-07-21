@@ -18,19 +18,25 @@
 //   <worker-url>?mode=beats&headline=...&subline=...      -> {"beats":[...]}
 
 const GROQ_BEATS_SYSTEM = [
-  'You write the spoken script for a short news video for GreaterNews, a Ghana-first news channel.',
-  'You are given a news card: a headline plus one or two sentences of context.',
-  'The headline is spoken first as the hook and a closing line is added automatically - do NOT repeat',
-  'either. Write the MIDDLE beats: 3 to 4 lines a presenter would say, each building on the last.',
+  'You script a short news video for GreaterNews, a Ghana-first news channel. You are given a',
+  'headline, one line of context, and optional longer story details. Write 4 to 6 beats that tell',
+  'the story in order, each building on the last.',
+  '',
+  'For EACH beat return:',
+  '- label: a 1-3 word ALL-CAPS section tag, e.g. THE STORY, THE DETAIL, WHO, WHY IT MATTERS,',
+  "  WHAT'S NEXT, THE SOURCE.",
+  '- caption: a SHORT on-screen line for the slide, max 6 words, punchy (not a full sentence).',
+  '- say: what the presenter SAYS for this beat - ONE natural spoken sentence, ~18 to 28 words, that',
+  '  actually explains this part of the story. This is the substance: make it informative and flowing.',
+  '- image: a concrete, searchable photo subject to depict this beat (a person, place, building or',
+  '  thing), Ghana-aware; empty string if there is nothing safe/relevant to depict.',
   '',
   'Rules:',
-  '- Each beat is ONE spoken-style sentence, max ~14 words.',
-  '- Use ONLY facts present in the headline/context. Never invent names, numbers, quotes or outcomes.',
+  '- Use ONLY facts in the headline/context/details. Never invent names, numbers, quotes or outcomes.',
+  '- The headline is spoken first as the hook and a closing line is added automatically - do NOT',
+  '  repeat either in the beats.',
   '- No hashtags, no emojis, no timestamps, no stage directions.',
-  "- Prefix each beat with a short ALL-CAPS section label in square brackets, e.g. [THE STORY],",
-  "  [THE DETAIL], [WHO], [WHY IT MATTERS], [WHAT'S NEXT], [THE SOURCE].",
-  '- If the context is thin, write fewer beats rather than padding with filler.',
-  'Respond with JSON only: {"beats": ["[LABEL] sentence", ...]}.',
+  'Respond with JSON only: {"scenes":[{"label":"","caption":"","say":"","image":""}]}',
 ].join('\n');
 
 export default {
@@ -63,13 +69,15 @@ export default {
       }
       const headline = (url.searchParams.get('headline') || '').slice(0, 600).trim();
       const subline = (url.searchParams.get('subline') || '').slice(0, 1200).trim();
+      const details = (url.searchParams.get('details') || '').slice(0, 4000).trim();
       const source = (url.searchParams.get('source') || '').slice(0, 120).trim();
-      if (!headline && !subline) {
+      if (!headline && !subline && !details) {
         return json(400, { error: 'missing headline/subline' });
       }
       const userMessage = [
         `Headline (the hook - do NOT repeat): ${headline}`,
         subline ? `Context: ${subline}` : '',
+        details ? `Story details:\n${details}` : '',
         source ? `Source: ${source}` : '',
       ].filter(Boolean).join('\n');
 
@@ -79,7 +87,7 @@ export default {
         body: JSON.stringify({
           model: env.GROQ_LLM_MODEL || 'llama-3.3-70b-versatile',
           temperature: 0.4,
-          max_tokens: 400,
+          max_tokens: 900,
           response_format: { type: 'json_object' },
           messages: [
             { role: 'system', content: GROQ_BEATS_SYSTEM },
@@ -91,14 +99,23 @@ export default {
         return json(502, { error: 'beats failed', status: upstream.status, detail: (await upstream.text()).slice(0, 300) });
       }
       const data = await upstream.json();
-      let beats = [];
+      let scenes = [];
       try {
         const parsed = JSON.parse(data.choices?.[0]?.message?.content || '{}');
-        beats = Array.isArray(parsed.beats) ? parsed.beats.map((b) => String(b).trim()).filter(Boolean) : [];
+        scenes = Array.isArray(parsed.scenes)
+          ? parsed.scenes
+              .filter((s) => s && (String(s.caption || '').trim() || String(s.say || '').trim()))
+              .map((s) => ({
+                label: String(s.label || '').trim(),
+                caption: String(s.caption || '').trim(),
+                say: String(s.say || '').trim(),
+                image: String(s.image || '').trim(),
+              }))
+          : [];
       } catch {
-        beats = [];
+        scenes = [];
       }
-      return json(200, { beats });
+      return json(200, { scenes });
     }
 
     // ---- Text-to-speech ----

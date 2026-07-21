@@ -18,6 +18,7 @@ export type VideoVoice = 'none' | 'google' | 'elevenlabs' | 'groq';
 
 export type VideoConfig = {
   scenes?: string[];
+  narration?: string[];
   motion?: VideoMotion;
   sound?: VideoSound;
   voice?: VideoVoice;
@@ -69,10 +70,14 @@ function easeOutCubic(t: number) {
   return 1 - Math.pow(1 - t, 3);
 }
 
-// The spoken script: headline (hook) → beat lines (labels stripped) → close.
-function voiceoverText(options: CardOptions, scenes: string[]) {
-  const beats = scenes.map((s) => s.replace(/^\s*\[[^\]]*\]\s*/, '').trim()).filter(Boolean);
-  return [options.headline.trim(), ...beats, 'Follow GreaterNews. News you can trust.'].filter(Boolean).join('. ');
+// The spoken script: headline (hook) → the fuller narration if provided, otherwise the on-screen
+// beat lines (labels stripped) → close. Decoupling narration from the captions lets the voice tell
+// the whole story while the slides stay short and readable.
+function voiceoverText(options: CardOptions, scenes: string[], narration?: string[]) {
+  const spoken = (narration && narration.length ? narration : scenes)
+    .map((line) => line.replace(/^\s*\[[^\]]*\]\s*/, '').trim())
+    .filter(Boolean);
+  return [options.headline.trim(), ...spoken, 'Follow GreaterNews. News you can trust.'].filter(Boolean).join('. ');
 }
 
 // Fetch narration and decode it to a 48k AudioBuffer. No live AudioContext needed — an
@@ -438,7 +443,7 @@ export async function exportCardVideo(
   let voiceBuffer: AudioBuffer | null = null;
   if (voice !== 'none') {
     try {
-      voiceBuffer = await fetchVoiceover(voice, voiceoverText(options, scenes));
+      voiceBuffer = await fetchVoiceover(voice, voiceoverText(options, scenes, config.narration));
     } catch {
       voiceBuffer = null;
     }

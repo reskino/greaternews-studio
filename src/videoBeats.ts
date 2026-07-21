@@ -1,7 +1,7 @@
-// Drafts a video script (the [LABEL] beat lines the video engine speaks) from a card's headline +
-// context. Uses Claude when a browser key is available — the deployed studio bakes
-// VITE_ANTHROPIC_API_KEY into the bundle — and otherwise falls back to a local heuristic so the
-// button always produces something. The beats are a starting point the user edits, never final.
+// Drafts a video script from a card. Produces, per beat: a SHORT on-screen caption, a FULLER spoken
+// narration sentence (so the voice tells the whole story while slides stay readable), and a photo
+// subject to depict. Uses Groq via the server-side proxy first, then Claude (if a browser key is
+// baked in), then a local heuristic — so the button always yields an editable starting point.
 
 const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages';
 const MODEL = 'claude-opus-4-8';
@@ -10,31 +10,53 @@ const MODEL = 'claude-opus-4-8';
 const PROXY = import.meta.env.VITE_TTS_PROXY_URL;
 
 const SYSTEM_PROMPT = [
-  'You write the spoken script for a short news video for GreaterNews, a Ghana-first news channel.',
-  'You are given a news card: a headline plus one or two sentences of context.',
-  'The headline is spoken first as the hook and a closing line is added automatically — do NOT',
-  'repeat either. Write the MIDDLE beats: 3 to 4 lines a presenter would say, each building on the',
-  'last so the story flows.',
+  'You script a short news video for GreaterNews, a Ghana-first news channel. You are given a',
+  'headline, one line of context, and optional longer story details. Write 4 to 6 beats that tell',
+  'the story in order, each building on the last.',
+  '',
+  'For EACH beat return:',
+  '- label: a 1-3 word ALL-CAPS section tag, e.g. THE STORY, THE DETAIL, WHO, WHY IT MATTERS,',
+  "  WHAT'S NEXT, THE SOURCE.",
+  '- caption: a SHORT on-screen line for the slide, max 6 words, punchy (not a full sentence).',
+  '- say: what the presenter SAYS for this beat — ONE natural spoken sentence, ~18 to 28 words, that',
+  '  actually explains this part of the story. This is the substance: make it informative and flowing.',
+  '- image: a concrete, searchable photo subject to depict this beat (a person, place, building or',
+  '  thing), Ghana-aware; empty string if there is nothing safe/relevant to depict.',
   '',
   'Rules:',
-  '- Each beat is ONE spoken-style sentence, max ~14 words.',
-  '- Use ONLY facts present in the headline/context. Never invent names, numbers, quotes or outcomes.',
+  '- Use ONLY facts in the headline/context/details. Never invent names, numbers, quotes or outcomes.',
+  '- The headline is spoken first as the hook and a closing line is added automatically — do NOT',
+  '  repeat either in the beats.',
   '- No hashtags, no emojis, no timestamps, no stage directions.',
-  '- Prefix each beat with a short ALL-CAPS section label in square brackets that frames it,',
-  '  e.g. [THE STORY], [THE DETAIL], [WHO], [WHY IT MATTERS], [WHAT\'S NEXT], [THE SOURCE].',
-  '- If the context is thin, write fewer beats rather than padding with filler or repetition.',
+  'Respond with JSON only: {"scenes":[{"label":"","caption":"","say":"","image":""}]}',
 ].join('\n');
 
 const SCHEMA = {
   type: 'object',
   additionalProperties: false,
   properties: {
-    beats: { type: 'array', items: { type: 'string' } },
+    scenes: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          label: { type: 'string' },
+          caption: { type: 'string' },
+          say: { type: 'string' },
+          image: { type: 'string' },
+        },
+        required: ['label', 'caption', 'say', 'image'],
+      },
+    },
   },
-  required: ['beats'],
+  required: ['scenes'],
 } as const;
 
-export type BeatsInput = { headline: string; subline: string; source?: string };
+export type BeatsInput = { headline: string; subline: string; details?: string; source?: string };
+export type RawScene = { label?: string; caption?: string; say?: string; image?: string };
+// captions[i] ↔ narration[i] ↔ imageQueries[i] all describe the same beat.
+export type DraftedBeats = { captions: string[]; narration: string[]; imageQueries: string[] };
 
 // Strip a leading "Source:" / "Photo:" / "Credit:" prefix so we can say "Reported by X".
 function cleanSource(footer: string): string {
@@ -49,57 +71,80 @@ function trimWords(text: string, max: number): string {
   return words.length <= max ? words.join(' ') : words.slice(0, max).join(' ');
 }
 
-const LABELS = ['[THE STORY]', '[THE DETAIL]', '[WHY IT MATTERS]', "[WHAT'S NEXT]"];
-
-// Offline fallback: split the context into sentences and label them in order. Rough, but always
-// available and easy to edit.
-export function heuristicBeats(input: BeatsInput): string[] {
-  const sentences = input.subline
-    .split(/(?<=[.!?])\s+/)
-    .map((s) => s.trim().replace(/[.]+$/, ''))
-    .filter(Boolean)
-    .slice(0, 3);
-
-  const beats = sentences.map((sentence, index) => `${LABELS[Math.min(index, LABELS.length - 1)]} ${trimWords(sentence, 16)}`);
-
-  if (beats.length === 0 && input.headline.trim()) {
-    beats.push(`[THE STORY] ${trimWords(input.headline.replace(/[.]+$/, ''), 16)}`);
+// Turn the model's scene objects into the three parallel arrays the studio uses.
+function scenesToBeats(scenes: RawScene[]): DraftedBeats | null {
+  const captions: string[] = [];
+  const narration: string[] = [];
+  const imageQueries: string[] = [];
+  for (const scene of scenes) {
+    const caption = String(scene.caption ?? '').trim();
+    const say = String(scene.say ?? '').trim();
+    if (!caption && !say) {
+      continue;
+    }
+    const label = String(scene.label ?? '').trim().replace(/[[\]]/g, '');
+    captions.push(label ? `[${label.toUpperCase()}] ${caption || say}` : caption || say);
+    narration.push(say || caption);
+    imageQueries.push(String(scene.image ?? '').trim());
   }
-
-  const source = input.source ? cleanSource(input.source) : '';
-  if (source && beats.length < 4) {
-    beats.push(`[THE SOURCE] Reported by ${source}`);
-  }
-
-  return beats;
+  return captions.length ? { captions, narration, imageQueries } : null;
 }
 
-// Groq beats via the server-side proxy (hosted worker or local resolver).
-async function fromProxy(input: BeatsInput): Promise<string[] | null> {
-  const params = new URLSearchParams({ headline: input.headline.trim(), subline: input.subline.trim() });
-  if (input.source) {
-    params.set('source', cleanSource(input.source));
-  }
-  const url = PROXY ? `${PROXY}${PROXY.includes('?') ? '&' : '?'}mode=beats&${params}` : `http://localhost:5199/beats?${params}`;
-  const response = await fetch(url, { signal: AbortSignal.timeout(20000) });
-  if (!response.ok) {
-    return null;
-  }
-  const data = (await response.json()) as { beats?: unknown };
-  const beats = Array.isArray(data.beats) ? data.beats.map((b) => String(b).trim()).filter(Boolean) : [];
-  return beats.length ? beats : null;
-}
-
-async function fromBrowserKey(input: BeatsInput, apiKey: string): Promise<string[] | null> {
+function buildUserMessage(input: BeatsInput): string {
   const source = input.source ? cleanSource(input.source) : '';
-  const userMessage = [
+  return [
     `Headline (the hook — do NOT repeat): ${input.headline.trim()}`,
     input.subline.trim() ? `Context: ${input.subline.trim()}` : '',
+    input.details && input.details.trim() ? `Story details:\n${input.details.trim()}` : '',
     source ? `Source: ${source}` : '',
   ]
     .filter(Boolean)
     .join('\n');
+}
 
+// Offline fallback: split the available text into sentences, one beat each. The caption is a short
+// clip of the sentence; the narration is the whole sentence.
+export function heuristicBeats(input: BeatsInput): DraftedBeats {
+  const LABELS = ['THE STORY', 'THE DETAIL', 'WHY IT MATTERS', "WHAT'S NEXT"];
+  const body = [input.details, input.subline].filter(Boolean).join(' ').trim() || input.headline;
+  const sentences = body
+    .split(/(?<=[.!?])\s+/)
+    .map((s) => s.trim().replace(/[.]+$/, ''))
+    .filter(Boolean)
+    .slice(0, 4);
+
+  const captions: string[] = [];
+  const narration: string[] = [];
+  const imageQueries: string[] = [];
+  sentences.forEach((sentence, index) => {
+    captions.push(`[${LABELS[Math.min(index, LABELS.length - 1)]}] ${trimWords(sentence, 6)}`);
+    narration.push(sentence);
+    imageQueries.push('');
+  });
+
+  const source = input.source ? cleanSource(input.source) : '';
+  if (source && captions.length < 4) {
+    captions.push('[THE SOURCE] ' + trimWords(`Reported by ${source}`, 6));
+    narration.push(`This was reported by ${source}.`);
+    imageQueries.push('');
+  }
+  return { captions, narration, imageQueries };
+}
+
+async function fromProxy(input: BeatsInput): Promise<DraftedBeats | null> {
+  const params = new URLSearchParams({ headline: input.headline.trim(), subline: input.subline.trim() });
+  if (input.details) params.set('details', input.details.trim());
+  if (input.source) params.set('source', cleanSource(input.source));
+  const url = PROXY ? `${PROXY}${PROXY.includes('?') ? '&' : '?'}mode=beats&${params}` : `http://localhost:5199/beats?${params}`;
+  const response = await fetch(url, { signal: AbortSignal.timeout(25000) });
+  if (!response.ok) {
+    return null;
+  }
+  const data = (await response.json()) as { scenes?: RawScene[] };
+  return Array.isArray(data.scenes) ? scenesToBeats(data.scenes) : null;
+}
+
+async function fromBrowserKey(input: BeatsInput, apiKey: string): Promise<DraftedBeats | null> {
   const response = await fetch(ANTHROPIC_URL, {
     method: 'POST',
     headers: {
@@ -108,13 +153,13 @@ async function fromBrowserKey(input: BeatsInput, apiKey: string): Promise<string
       'anthropic-version': '2023-06-01',
       'anthropic-dangerous-direct-browser-access': 'true',
     },
-    signal: AbortSignal.timeout(20000),
+    signal: AbortSignal.timeout(25000),
     body: JSON.stringify({
       model: MODEL,
-      max_tokens: 400,
+      max_tokens: 900,
       output_config: { effort: 'low', format: { type: 'json_schema', schema: SCHEMA } },
       system: SYSTEM_PROMPT,
-      messages: [{ role: 'user', content: userMessage }],
+      messages: [{ role: 'user', content: buildUserMessage(input) }],
     }),
   });
   if (!response.ok) {
@@ -125,22 +170,20 @@ async function fromBrowserKey(input: BeatsInput, apiKey: string): Promise<string
   if (!text) {
     return null;
   }
-  const parsed = JSON.parse(text) as { beats?: unknown };
-  const beats = Array.isArray(parsed.beats) ? parsed.beats.map((b) => String(b).trim()).filter(Boolean) : [];
-  return beats.length ? beats : null;
+  const parsed = JSON.parse(text) as { scenes?: RawScene[] };
+  return Array.isArray(parsed.scenes) ? scenesToBeats(parsed.scenes) : null;
 }
 
-// Draft beat lines for the card. Tries Claude (browser key), then the heuristic. Always resolves to
-// at least one line unless there's nothing to work with.
-export async function draftVideoBeats(input: BeatsInput): Promise<string[]> {
-  if (!input.headline.trim() && !input.subline.trim()) {
-    return [];
+// Draft the video script for the card. Tries Groq (proxy), then Claude, then the heuristic.
+export async function draftVideoBeats(input: BeatsInput): Promise<DraftedBeats> {
+  if (!input.headline.trim() && !input.subline.trim() && !input.details?.trim()) {
+    return { captions: [], narration: [], imageQueries: [] };
   }
 
   // 1. Groq via the proxy (worker on the web, resolver locally).
   try {
     const beats = await fromProxy(input);
-    if (beats && beats.length) {
+    if (beats && beats.captions.length) {
       return beats;
     }
   } catch {
@@ -152,7 +195,7 @@ export async function draftVideoBeats(input: BeatsInput): Promise<string[]> {
   if (apiKey) {
     try {
       const beats = await fromBrowserKey(input, apiKey);
-      if (beats && beats.length) {
+      if (beats && beats.captions.length) {
         return beats;
       }
     } catch {
