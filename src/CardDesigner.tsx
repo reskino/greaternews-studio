@@ -89,6 +89,9 @@ export default function CardDesigner({
   const [videoImageQueries, setVideoImageQueries] = useState<string[]>([]);
   const [beatImages, setBeatImages] = useState<(HTMLImageElement | null)[]>([]);
   const [fetchingBeatImages, setFetchingBeatImages] = useState(false);
+  const [beatOptions, setBeatOptions] = useState<Record<number, ImageResult[]>>({});
+  const [beatOptionsOpen, setBeatOptionsOpen] = useState<number | null>(null);
+  const [loadingOptions, setLoadingOptions] = useState<number | null>(null);
   const [draftingBeats, setDraftingBeats] = useState(false);
   const [videoMotion, setVideoMotion] = useState<VideoMotion>('subtle');
   const [videoSound, setVideoSound] = useState<VideoSound>('newsroom');
@@ -412,16 +415,52 @@ export default function CardDesigner({
     });
   }
 
-  async function fetchBeatImage(index: number) {
+  // Gather several candidates for a beat (Google Images first for relevance, then licensed).
+  async function searchBeatCandidates(query: string): Promise<ImageResult[]> {
+    const settled = await Promise.allSettled([
+      searchSerperImages(query),
+      searchGoogleImages(query),
+      searchOpenverse(query),
+      searchCommons(query),
+      searchWikipediaImages(query),
+    ]);
+    const all = settled.flatMap((result) => (result.status === 'fulfilled' ? result.value : []));
+    return dedupeResults(all).slice(0, 8);
+  }
+
+  // Open the options grid for a beat and load candidates to choose from.
+  async function showBeatOptions(index: number) {
     const query = beatQuery(index);
     if (!query) return;
-    const best = await findBestPhoto(query, { broadFirst: true }).catch(() => null);
-    setBeatImages((prev) => {
-      const next = prev.slice();
-      while (next.length <= index) next.push(null);
-      next[index] = best?.image ?? null;
-      return next;
-    });
+    if (beatOptionsOpen === index) {
+      setBeatOptionsOpen(null);
+      return;
+    }
+    setBeatOptionsOpen(index);
+    setLoadingOptions(index);
+    try {
+      const results = await searchBeatCandidates(query);
+      setBeatOptions((prev) => ({ ...prev, [index]: results }));
+    } catch {
+      setBeatOptions((prev) => ({ ...prev, [index]: [] }));
+    }
+    setLoadingOptions(null);
+  }
+
+  // Pick a candidate for a beat — load the full image and set it, then close the grid.
+  async function chooseBeatImage(index: number, result: ImageResult) {
+    try {
+      const image = await loadImageWithProxyFallback(result.fullUrl);
+      setBeatImages((prev) => {
+        const next = prev.slice();
+        while (next.length <= index) next.push(null);
+        next[index] = image;
+        return next;
+      });
+      setBeatOptionsOpen(null);
+    } catch {
+      // That image wouldn't load — leave the grid open so they can pick another.
+    }
   }
 
   async function autoFillBeatImages() {
@@ -826,28 +865,53 @@ export default function CardDesigner({
           {captionLines().length > 0 ? (
             <div className="beat-images">
               <span style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
-                Clip images — one per caption (Google Images first, then licensed; edit a query + Find to swap)
+                Clip images — auto-fill a quick pick per caption, or edit a query and Find to choose from options
                 <button type="button" className="link-button" onClick={() => void autoFillBeatImages()} disabled={fetchingBeatImages}>
                   {fetchingBeatImages ? 'finding…' : 'auto-fill images'}
                 </button>
               </span>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 8 }}>
                 {captionLines().map((caption, index) => (
-                  <div key={index} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <div style={{ width: 44, height: 58, flexShrink: 0, borderRadius: 6, overflow: 'hidden', background: 'rgba(255,255,255,0.08)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                      {beatImages[index] ? (
-                        <img src={beatImages[index]!.src} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                      ) : (
-                        <span style={{ fontSize: 16, opacity: 0.4 }}>▢</span>
-                      )}
+                  <div key={index} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <div style={{ width: 44, height: 58, flexShrink: 0, borderRadius: 6, overflow: 'hidden', background: 'rgba(255,255,255,0.08)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        {beatImages[index] ? (
+                          <img src={beatImages[index]!.src} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                        ) : (
+                          <span style={{ fontSize: 16, opacity: 0.4 }}>▢</span>
+                        )}
+                      </div>
+                      <input
+                        value={videoImageQueries[index] ?? ''}
+                        onChange={(event) => setBeatQuery(index, event.target.value)}
+                        placeholder={caption.replace(/^\[[^\]]*\]\s*/, '') || 'photo subject'}
+                        style={{ flex: 1, minWidth: 0 }}
+                      />
+                      <button type="button" className="secondary" onClick={() => void showBeatOptions(index)}>
+                        {beatOptionsOpen === index ? 'close' : 'find'}
+                      </button>
                     </div>
-                    <input
-                      value={videoImageQueries[index] ?? ''}
-                      onChange={(event) => setBeatQuery(index, event.target.value)}
-                      placeholder={caption.replace(/^\[[^\]]*\]\s*/, '') || 'photo subject'}
-                      style={{ flex: 1, minWidth: 0 }}
-                    />
-                    <button type="button" className="secondary" onClick={() => void fetchBeatImage(index)}>find</button>
+                    {beatOptionsOpen === index ? (
+                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', paddingLeft: 52 }}>
+                        {loadingOptions === index ? (
+                          <span style={{ opacity: 0.6, fontSize: 13 }}>searching…</span>
+                        ) : (beatOptions[index] ?? []).length === 0 ? (
+                          <span style={{ opacity: 0.6, fontSize: 13 }}>no images found — try a different query</span>
+                        ) : (
+                          (beatOptions[index] ?? []).map((result) => (
+                            <button
+                              key={result.id}
+                              type="button"
+                              onClick={() => void chooseBeatImage(index, result)}
+                              title={`${result.title} — ${result.provider}`}
+                              style={{ padding: 0, width: 64, height: 80, borderRadius: 6, overflow: 'hidden', cursor: 'pointer', background: 'none', border: beatImages[index]?.src === result.fullUrl ? '2px solid #f3c457' : '1px solid rgba(255,255,255,0.18)' }}
+                            >
+                              <img src={result.thumbUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                            </button>
+                          ))
+                        )}
+                      </div>
+                    ) : null}
                   </div>
                 ))}
               </div>
