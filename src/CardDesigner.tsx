@@ -110,6 +110,8 @@ export default function CardDesigner({
   const [results, setResults] = useState<ImageResult[]>([]);
   const [storyQueries, setStoryQueries] = useState<string[]>([]);
   const [loadingImageId, setLoadingImageId] = useState('');
+  // Where a clicked main-search result goes: the card's main photo, or a specific beat (clip) index.
+  const [searchTarget, setSearchTarget] = useState<'main' | number>('main');
   const [plan, setPlan] = useState<SearchPlan | null>(null);
 
   useEffect(() => {
@@ -268,16 +270,27 @@ export default function CardDesigner({
 
     try {
       const image = await loadImageWithProxyFallback(result.fullUrl);
-      if (photoUrlRef.current) {
-        URL.revokeObjectURL(photoUrlRef.current);
-        photoUrlRef.current = '';
+      if (typeof searchTarget === 'number') {
+        // Assign to a specific beat/clip instead of the main photo.
+        const idx = searchTarget;
+        setBeatImages((prev) => {
+          const next = prev.slice();
+          while (next.length <= idx) next.push(null);
+          next[idx] = image;
+          return next;
+        });
+      } else {
+        if (photoUrlRef.current) {
+          URL.revokeObjectURL(photoUrlRef.current);
+          photoUrlRef.current = '';
+        }
+        setPhoto(image);
+        setPhotoName(`${result.title} — ${result.provider}`);
+        setPhotoSourcePage(result.sourcePage);
+        // Some Wikimedia Artist fields are whole paragraphs — keep the credit line short.
+        const author = result.author.length > 40 ? `${result.author.slice(0, 39).trimEnd()}…` : result.author;
+        setFooter(`Photo: ${author} · ${result.license} · ${result.provider}`);
       }
-      setPhoto(image);
-      setPhotoName(`${result.title} — ${result.provider}`);
-      setPhotoSourcePage(result.sourcePage);
-      // Some Wikimedia Artist fields are whole paragraphs — keep the credit line short.
-      const author = result.author.length > 40 ? `${result.author.slice(0, 39).trimEnd()}…` : result.author;
-      setFooter(`Photo: ${author} · ${result.license} · ${result.provider}`);
     } catch {
       setSearchError('Could not load that image (the source may block downloads). Try another result, or download it manually and upload it.');
     } finally {
@@ -621,6 +634,25 @@ export default function CardDesigner({
 
           {results.length > 0 ? (
             <>
+              {captionLines().length > 0 ? (
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginBottom: 8 }}>
+                  <span style={{ fontSize: 13, opacity: 0.7 }}>Apply pick to:</span>
+                  {(['main', ...captionLines().map((_, i) => i)] as ('main' | number)[]).map((target) => {
+                    const active = searchTarget === target;
+                    const label = target === 'main' ? 'Main photo' : `Clip ${target + 1}${beatImages[target] ? ' ✓' : ''}`;
+                    return (
+                      <button
+                        key={String(target)}
+                        type="button"
+                        onClick={() => setSearchTarget(target)}
+                        style={{ padding: '4px 10px', borderRadius: 999, fontSize: 13, cursor: 'pointer', color: 'inherit', border: active ? '1px solid #f3c457' : '1px solid rgba(255,255,255,0.2)', background: active ? 'rgba(243,196,87,0.15)' : 'transparent' }}
+                      >
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : null}
               <div className="image-results">
                 {results.map((result) => (
                   <button
@@ -636,7 +668,9 @@ export default function CardDesigner({
                 ))}
               </div>
               <p className="designer-note">
-                Click a photo to load it — the credit line is filled in automatically. Always confirm the license on the source page before publishing.
+                {typeof searchTarget === 'number'
+                  ? `Click a photo to use it for Clip ${searchTarget + 1}. Confirm the license on the source page before publishing.`
+                  : 'Click a photo to load it as the main photo — the credit line is filled in automatically. Always confirm the license on the source page before publishing.'}
               </p>
             </>
           ) : null}
