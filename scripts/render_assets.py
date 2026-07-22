@@ -84,6 +84,23 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", "application/json")
             self.end_headers()
             self.wfile.write(body)
+        elif parsed.path.startswith("/music/"):
+            # Serve user music tracks from public/music/ (vite preview returns 204 to the headless
+            # fetch, so the renderer fetches tracks from here instead).
+            name = os.path.basename(urllib.parse.unquote(parsed.path[len("/music/"):]))
+            fpath = os.path.join(ROOT, "public", "music", name)
+            if name and os.path.exists(fpath):
+                data = open(fpath, "rb").read()
+                self.send_response(200)
+                self._cors()
+                self.send_header("Content-Type", "audio/mpeg")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+            else:
+                self.send_response(404)
+                self._cors()
+                self.end_headers()
         elif parsed.path == "/done":
             params = urllib.parse.parse_qs(parsed.query)
             results["rendered"] = int(params.get("rendered", ["0"])[0])

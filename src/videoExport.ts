@@ -22,6 +22,7 @@ export type VideoConfig = {
   beatPhotos?: (HTMLImageElement | null)[];
   motion?: VideoMotion;
   sound?: VideoSound;
+  musicUrl?: string; // a user-provided music track (overrides the synth bed when set)
   voice?: VideoVoice;
   voiceName?: string; // specific voice within the engine (e.g. a Groq/Orpheus voice)
 };
@@ -183,22 +184,47 @@ function buildTimeline(options: CardOptions, config: VideoConfig, voiceBuffer: A
 // Render music + narration into a single AudioBuffer, offline (faster than real-time, deterministic,
 // and — crucially — not captured through MediaRecorder, so no ticking/glitches). Returns null when
 // there's no audio at all.
-async function renderAudioMix(sound: VideoSound, voiceBuffer: AudioBuffer | null, totalMs: number): Promise<AudioBuffer | null> {
-  if (sound === 'none' && !voiceBuffer) {
+// Fetch + decode a user music track (same-origin, so no CORS). Decodes on a dedicated
+// OfflineAudioContext (like the voiceover path) — decoding on the live/render context can silently
+// fail. Returns null on any failure. AudioBuffers are reusable across contexts at the same rate.
+async function fetchMusic(url: string): Promise<AudioBuffer | null> {
+  try {
+    const response = await fetch(url, { signal: AbortSignal.timeout(30000) });
+    if (!response.ok) {
+      return null;
+    }
+    const decodeCtx = new OfflineAudioContext(1, 1, AUDIO_SR);
+    return await decodeCtx.decodeAudioData(await response.arrayBuffer());
+  } catch {
+    return null;
+  }
+}
+
+async function renderAudioMix(sound: VideoSound, musicBuffer: AudioBuffer | null, voiceBuffer: AudioBuffer | null, totalMs: number): Promise<AudioBuffer | null> {
+  const hasMusic = sound !== 'none' || !!musicBuffer;
+  if (!hasMusic && !voiceBuffer) {
     return null;
   }
   const durSec = (totalMs + HOLD_MS) / 1000;
   const octx = new OfflineAudioContext(2, Math.ceil(durSec * AUDIO_SR), AUDIO_SR);
 
-  if (sound !== 'none') {
+  if (hasMusic) {
     const master = octx.createGain();
-    const level = voiceBuffer ? 0.32 : 0.5; // duck music under narration, but keep it present to fill pauses
+    const level = voiceBuffer ? 0.2 : 0.4; // duck music under narration, but keep it present to fill pauses
     master.gain.setValueAtTime(0.0001, 0);
     master.gain.exponentialRampToValueAtTime(level, 0.6);
     master.gain.setValueAtTime(level, Math.max(0.6, durSec - 1.2));
     master.gain.exponentialRampToValueAtTime(0.0001, durSec);
     master.connect(octx.destination);
-    scheduleBed(octx as unknown as AudioContext, master, sound, durSec);
+    if (musicBuffer) {
+      const source = octx.createBufferSource();
+      source.buffer = musicBuffer;
+      source.loop = true; // loop the track to fill the whole clip
+      source.connect(master);
+      source.start(0);
+    } else {
+      scheduleBed(octx as unknown as AudioContext, master, sound, durSec);
+    }
   }
 
   if (voiceBuffer) {
@@ -340,6 +366,7 @@ async function encodeWithWebCodecs(timeline: Timeline, audioBuffer: AudioBuffer 
 async function exportViaMediaRecorder(
   timeline: Timeline,
   sound: VideoSound,
+  musicBuffer: AudioBuffer | null,
   voiceBuffer: AudioBuffer | null,
   onProgress?: (progress: number) => void,
 ): Promise<VideoExportResult> {
@@ -348,9 +375,10 @@ async function exportViaMediaRecorder(
     throw new Error('This browser cannot record video from a canvas.');
   }
   const { totalMs, stage, paint } = timeline;
+  const hasMusic = sound !== 'none' || !!musicBuffer;
 
   let audioCtx: AudioContext | null = null;
-  if ((sound !== 'none' || voiceBuffer) && typeof AudioContext !== 'undefined') {
+  if ((hasMusic || voiceBuffer) && typeof AudioContext !== 'undefined') {
     try {
       audioCtx = new AudioContext();
       if (audioCtx.state === 'suspended') {
@@ -365,12 +393,12 @@ async function exportViaMediaRecorder(
   const videoStream = stage.captureStream(FPS);
   let recordStream: MediaStream = videoStream;
 
-  if (audioCtx && (sound !== 'none' || voiceBuffer)) {
+  if (audioCtx && (hasMusic || voiceBuffer)) {
     const dest = audioCtx.createMediaStreamDestination();
     const now = audioCtx.currentTime;
     const fullSeconds = (totalMs + HOLD_MS) / 1000;
 
-    if (sound !== 'none') {
+    if (hasMusic) {
       const master = audioCtx.createGain();
       const level = voiceBuffer ? 0.2 : 0.4;
       master.gain.setValueAtTime(0.0001, now);
@@ -378,7 +406,15 @@ async function exportViaMediaRecorder(
       master.gain.setValueAtTime(level, now + Math.max(0.6, fullSeconds - 1.2));
       master.gain.exponentialRampToValueAtTime(0.0001, now + fullSeconds);
       master.connect(dest);
-      scheduleBed(audioCtx, master, sound, fullSeconds);
+      if (musicBuffer) {
+        const source = audioCtx.createBufferSource();
+        source.buffer = musicBuffer;
+        source.loop = true;
+        source.connect(master);
+        source.start(now);
+      } else {
+        scheduleBed(audioCtx, master, sound, fullSeconds);
+      }
     }
 
     if (voiceBuffer) {
@@ -452,11 +488,18 @@ export async function exportCardVideo(
     }
   }
 
+  // Decode a user music track (if any) upfront — before the render context exists — mirroring the
+  // voice path, so we never hold two audio contexts open at once.
+  let musicBuffer: AudioBuffer | null = null;
+  if (config.musicUrl) {
+    musicBuffer = await fetchMusic(config.musicUrl);
+  }
+
   const timeline = buildTimeline(options, config, voiceBuffer);
 
   if (webCodecsSupported()) {
     try {
-      const audioBuffer = await renderAudioMix(sound, voiceBuffer, timeline.totalMs);
+      const audioBuffer = await renderAudioMix(sound, musicBuffer, voiceBuffer, timeline.totalMs);
       return await encodeWithWebCodecs(timeline, audioBuffer, onProgress);
     } catch (err) {
       // Any WebCodecs failure (unsupported config, encoder error) falls back to the capture path.
@@ -464,5 +507,5 @@ export async function exportCardVideo(
     }
   }
 
-  return exportViaMediaRecorder(timeline, sound, voiceBuffer, onProgress);
+  return exportViaMediaRecorder(timeline, sound, musicBuffer, voiceBuffer, onProgress);
 }

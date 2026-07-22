@@ -6,6 +6,7 @@ import { drawCard, formatSizes } from './cardEngine';
 import { fetchArticleImage } from './article';
 import { findBestPhoto, loadImage, loadImageWithProxyFallback } from './imageSearch';
 import { exportCardVideo, videoExportSupported } from './videoExport';
+import type { VideoSound } from './videoExport';
 
 const SERVER = 'http://localhost:5198';
 
@@ -34,7 +35,8 @@ type CardSpec = {
   narration?: string[];
   photoQueries?: (string | null)[];
   motion?: 'subtle' | 'dynamic' | 'minimal';
-  sound?: 'none' | 'newsroom' | 'uplift' | 'calm';
+  sound?: VideoSound;
+  music?: string; // a track in public/music/ (file name) or a full URL — overrides the synth bed
   voice?: 'none' | 'google' | 'elevenlabs' | 'groq';
   voiceName?: string;
 };
@@ -192,7 +194,7 @@ async function run() {
           );
         }
         try {
-          const { blob, extension } = await withTimeout(exportCardVideo({ ...options, format: 'story' }, { scenes: card.scenes ?? [], narration: card.narration, beatPhotos, motion: card.motion, sound: card.sound, voice: card.voice, voiceName: card.voiceName }), 90_000);
+          const { blob, extension } = await withTimeout(exportCardVideo({ ...options, format: 'story' }, { scenes: card.scenes ?? [], narration: card.narration, beatPhotos, motion: card.motion, sound: card.sound, musicUrl: card.music ? (/^https?:/.test(card.music) ? card.music : `${SERVER}/music/${card.music.split('/').pop()}`) : undefined, voice: card.voice, voiceName: card.voiceName }), 90_000);
           await upload(`${card.slug}_9x16.${extension}`, blob);
           rendered += 1;
           log(`✓ ${card.slug}_9x16.${extension} (${Math.round(blob.size / 1024)} KB)`, 'ok');

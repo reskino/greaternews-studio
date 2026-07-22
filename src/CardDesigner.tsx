@@ -8,6 +8,8 @@ import { draftVideoBeats } from './videoBeats';
 import type { VideoMotion, VideoSound, VideoVoice } from './videoExport';
 import { exportCardVideo, videoExportSupported } from './videoExport';
 import { SOUND_LABELS, scheduleBed } from './videoAudio';
+import { isTrackId, loadMusicTracks, musicUrlFor } from './music';
+import type { MusicTrack } from './music';
 
 type CardDesignerProps = {
   suggestedHeadline: string;
@@ -94,7 +96,8 @@ export default function CardDesigner({
   const [loadingOptions, setLoadingOptions] = useState<number | null>(null);
   const [draftingBeats, setDraftingBeats] = useState(false);
   const [videoMotion, setVideoMotion] = useState<VideoMotion>('subtle');
-  const [videoSound, setVideoSound] = useState<VideoSound>('newsroom');
+  const [videoSound, setVideoSound] = useState<string>('newsroom'); // a SOUND_LABELS key or a `track:<file>` id
+  const [musicTracks, setMusicTracks] = useState<MusicTrack[]>([]);
   const [videoVoice, setVideoVoice] = useState<VideoVoice>('none');
   const [groqVoiceName, setGroqVoiceName] = useState('hannah'); // Orpheus voice when videoVoice==='groq'
   const [previewingSound, setPreviewingSound] = useState(false);
@@ -115,6 +118,10 @@ export default function CardDesigner({
   // Where a clicked main-search result goes: the card's main photo, or a specific beat (clip) index.
   const [searchTarget, setSearchTarget] = useState<'main' | number>('main');
   const [plan, setPlan] = useState<SearchPlan | null>(null);
+
+  useEffect(() => {
+    void loadMusicTracks().then(setMusicTracks);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -506,8 +513,9 @@ export default function CardDesigner({
     setPreviewingSound(false);
   }
 
-  // Play the selected music bed for a few seconds so it can be judged before rendering a video.
-  function previewSound() {
+  // Play the selected sound (synth bed or user track) for a few seconds so it can be judged before
+  // rendering a video, at the same mix level the video would use.
+  async function previewSound() {
     stopSoundPreview();
     if (videoSound === 'none' || typeof AudioContext === 'undefined') {
       return;
@@ -516,13 +524,30 @@ export default function CardDesigner({
       const ctx = new AudioContext();
       previewCtxRef.current = ctx;
       const master = ctx.createGain();
-      const seconds = 4;
+      const seconds = 5;
       master.gain.value = videoVoice === 'none' ? 0.4 : 0.2; // match the mix level used in the video
       master.connect(ctx.destination);
-      scheduleBed(ctx, master, videoSound, seconds);
+      setPreviewingSound(true);
+
+      if (isTrackId(videoSound)) {
+        const url = musicUrlFor(videoSound, musicTracks);
+        const response = url ? await fetch(url) : null;
+        if (!response || !response.ok || previewCtxRef.current !== ctx) {
+          stopSoundPreview();
+          return;
+        }
+        const buffer = await ctx.decodeAudioData(await response.arrayBuffer());
+        if (previewCtxRef.current !== ctx) return; // stopped while loading
+        const source = ctx.createBufferSource();
+        source.buffer = buffer;
+        source.connect(master);
+        source.start();
+      } else {
+        scheduleBed(ctx, master, videoSound as VideoSound, seconds);
+      }
+
       master.gain.setValueAtTime(master.gain.value, ctx.currentTime + seconds - 0.4);
       master.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + seconds);
-      setPreviewingSound(true);
       window.setTimeout(() => {
         if (previewCtxRef.current === ctx) stopSoundPreview();
       }, (seconds + 0.25) * 1000);
@@ -540,7 +565,7 @@ export default function CardDesigner({
     try {
       const { blob, extension } = await exportCardVideo(
         { template, format, photo, logo, headline, subline, highlight, attribution, chip, statValue, postHandle, postMeta, footer, handle, accent, dim, headlineShift: textShift },
-        { scenes: videoBeats.split('\n').map((beat) => beat.trim()).filter(Boolean), narration: videoNarration.split('\n').map((line) => line.trim()).filter(Boolean), beatPhotos: beatImages, motion: videoMotion, sound: videoSound, voice: videoVoice, voiceName: videoVoice === 'groq' ? groqVoiceName : undefined },
+        { scenes: videoBeats.split('\n').map((beat) => beat.trim()).filter(Boolean), narration: videoNarration.split('\n').map((line) => line.trim()).filter(Boolean), beatPhotos: beatImages, motion: videoMotion, sound: (isTrackId(videoSound) ? 'none' : (videoSound as VideoSound)), musicUrl: isTrackId(videoSound) ? (musicUrlFor(videoSound, musicTracks) ?? undefined) : undefined, voice: videoVoice, voiceName: videoVoice === 'groq' ? groqVoiceName : undefined },
         (progress) => setVideoProgress(progress),
       );
       const url = URL.createObjectURL(blob);
@@ -998,16 +1023,27 @@ export default function CardDesigner({
             <label>
               <span>
                 Video sound
-                <button type="button" className="link-button" onClick={() => (previewingSound ? stopSoundPreview() : previewSound())} disabled={videoSound === 'none'}>
+                <button type="button" className="link-button" onClick={() => (previewingSound ? stopSoundPreview() : void previewSound())} disabled={videoSound === 'none'}>
                   {previewingSound ? 'stop' : 'preview'}
                 </button>
               </span>
-              <select value={videoSound} onChange={(event) => { stopSoundPreview(); setVideoSound(event.target.value as VideoSound); }}>
-                {(Object.keys(SOUND_LABELS) as VideoSound[]).map((key) => (
-                  <option key={key} value={key}>
-                    {SOUND_LABELS[key]}
-                  </option>
-                ))}
+              <select value={videoSound} onChange={(event) => { stopSoundPreview(); setVideoSound(event.target.value); }}>
+                <optgroup label="Moods">
+                  {(Object.keys(SOUND_LABELS) as VideoSound[]).map((key) => (
+                    <option key={key} value={key}>
+                      {SOUND_LABELS[key]}
+                    </option>
+                  ))}
+                </optgroup>
+                {musicTracks.length > 0 ? (
+                  <optgroup label="My music">
+                    {musicTracks.map((track) => (
+                      <option key={track.id} value={track.id}>
+                        {track.label}
+                      </option>
+                    ))}
+                  </optgroup>
+                ) : null}
               </select>
             </label>
           </div>
