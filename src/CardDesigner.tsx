@@ -415,7 +415,7 @@ export default function CardDesigner({
   async function fetchBeatImage(index: number) {
     const query = beatQuery(index);
     if (!query) return;
-    const best = await findBestPhoto(query).catch(() => null);
+    const best = await findBestPhoto(query, { broadFirst: true }).catch(() => null);
     setBeatImages((prev) => {
       const next = prev.slice();
       while (next.length <= index) next.push(null);
@@ -433,7 +433,7 @@ export default function CardDesigner({
         captions.map(async (_, index) => {
           const query = beatQuery(index);
           if (!query) return null;
-          const best = await findBestPhoto(query).catch(() => null);
+          const best = await findBestPhoto(query, { broadFirst: true }).catch(() => null);
           return best?.image ?? null;
         }),
       );
@@ -826,7 +826,7 @@ export default function CardDesigner({
           {captionLines().length > 0 ? (
             <div className="beat-images">
               <span style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
-                Clip images — one per caption (licensed Wikipedia / Commons, auto-credited)
+                Clip images — one per caption (Google Images first, then licensed; edit a query + Find to swap)
                 <button type="button" className="link-button" onClick={() => void autoFillBeatImages()} disabled={fetchingBeatImages}>
                   {fetchingBeatImages ? 'finding…' : 'auto-fill images'}
                 </button>

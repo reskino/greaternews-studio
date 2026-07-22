@@ -594,12 +594,10 @@ export async function loadImageWithProxyFallback(url: string) {
 // Best licensed photo for an editorial query: Wikipedia lead images first (the canonical
 // photo of the entity), then Commons keyword matches. Returns the loaded image plus the
 // attribution line that must appear on the card.
-export async function findBestPhoto(query: string): Promise<{ image: HTMLImageElement; credit: string } | null> {
-  // Tier 1 — freely-licensed sources (Wikipedia lead image, Commons, Openverse). Openverse alone
-  // adds millions of CC-licensed images, so coverage is far wider than Commons+Wikipedia.
+// Freely-licensed tier (Wikipedia lead image, Commons, Openverse). Safe to reuse, credit stamped.
+async function bestLicensedPhoto(query: string): Promise<{ image: HTMLImageElement; credit: string } | null> {
   const settled = await Promise.allSettled([searchWikipediaImages(query), searchCommons(query), searchOpenverse(query)]);
   const licensed = dedupeResults(settled.flatMap((result) => (result.status === 'fulfilled' ? result.value : [])));
-
   for (const candidate of licensed.slice(0, 5)) {
     try {
       const image = await loadImageWithProxyFallback(candidate.fullUrl);
@@ -609,9 +607,11 @@ export async function findBestPhoto(query: string): Promise<{ image: HTMLImageEl
       // Try the next candidate.
     }
   }
+  return null;
+}
 
-  // Tier 2 — broad web fallback (Serper / Google Images) when nothing licensed matched. Credited to
-  // the source; rights aren't guaranteed, so this is a last resort for coverage.
+// Broad web tier (Serper / Google Images) — far better relevance, but rights aren't guaranteed.
+async function bestWebPhoto(query: string): Promise<{ image: HTMLImageElement; credit: string } | null> {
   try {
     const broad = dedupeResults(await searchSerperImages(query));
     for (const candidate of broad.slice(0, 5)) {
@@ -623,8 +623,17 @@ export async function findBestPhoto(query: string): Promise<{ image: HTMLImageEl
       }
     }
   } catch {
-    // Serper unavailable (no key) or failed — nothing more to try.
+    // Serper unavailable (no key) or failed.
   }
-
   return null;
+}
+
+// Best photo for a query. Default prefers licensed sources then web (safest — used for auto-posting
+// in the pipeline). `broadFirst` prefers Google Images relevance then licensed — for the studio,
+// where a human reviews and swaps before exporting.
+export async function findBestPhoto(query: string, opts: { broadFirst?: boolean } = {}): Promise<{ image: HTMLImageElement; credit: string } | null> {
+  if (opts.broadFirst) {
+    return (await bestWebPhoto(query)) ?? (await bestLicensedPhoto(query));
+  }
+  return (await bestLicensedPhoto(query)) ?? (await bestWebPhoto(query));
 }
