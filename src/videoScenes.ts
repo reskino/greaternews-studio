@@ -176,21 +176,22 @@ function drawBeatContent(ctx: Ctx, options: CardOptions, beat: Beat, width: numb
   drawGnBadge(ctx, width, options.logo);
   drawBrandStrip(ctx, width, Math.round(height * 0.1));
 
-  const kickerFont = Math.round(width * 0.028);
+  const kickerFont = Math.round(width * 0.03);
   const hasLabel = beat.label.length > 0;
-  const kickerBlock = hasLabel ? kickerFont * 1.2 + Math.round(height * 0.022) : 0;
+  const kickerBlock = hasLabel ? kickerFont * 1.2 + Math.round(height * 0.02) : 0;
 
+  // Captions are short (a few words), so start large and let fitText shrink only long ones.
   const fit = fitText(ctx, beat.text, {
-    maxWidth: width * 0.84,
-    maxHeight: height * 0.42,
-    baseFont: Math.round(width * 0.075),
-    minFont: Math.round(width * 0.045),
-    maxLines: 4,
+    maxWidth: width * 0.86,
+    maxHeight: height * 0.4,
+    baseFont: Math.round(width * 0.11),
+    minFont: Math.round(width * 0.05),
+    maxLines: 3,
     weight: 800,
-    factor: 1.18,
+    factor: 1.12,
   });
 
-  const groupTop = (height - (kickerBlock + fit.height)) / 2 + Math.round(height * 0.05);
+  const groupTop = (height - (kickerBlock + fit.height)) / 2 + Math.round(height * 0.02);
 
   if (hasLabel) {
     ctx.font = `800 ${kickerFont}px ${FONT_STACK}`;

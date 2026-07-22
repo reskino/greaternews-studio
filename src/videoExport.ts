@@ -372,7 +372,7 @@ async function exportViaMediaRecorder(
 
     if (sound !== 'none') {
       const master = audioCtx.createGain();
-      const level = voiceBuffer ? 0.32 : 0.5;
+      const level = voiceBuffer ? 0.2 : 0.4;
       master.gain.setValueAtTime(0.0001, now);
       master.gain.exponentialRampToValueAtTime(level, now + 0.6);
       master.gain.setValueAtTime(level, now + Math.max(0.6, fullSeconds - 1.2));
