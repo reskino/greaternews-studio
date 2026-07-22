@@ -1,7 +1,7 @@
 // Procedurally-generated background beds for the story video, built with the Web Audio API —
 // royalty-free by construction (no bundled/licensed files) and mixed straight into the export.
 // Subtle ambient beds meant to sit under the on-screen text, not to be produced music.
-export type VideoSound = 'none' | 'newsroom' | 'uplift' | 'calm' | 'breaking' | 'documentary' | 'tech';
+export type VideoSound = 'none' | 'newsroom' | 'uplift' | 'calm' | 'breaking' | 'documentary' | 'tech' | 'afro' | 'lofi' | 'anthem';
 
 export const SOUND_LABELS: Record<VideoSound, string> = {
   none: 'None (silent)',
@@ -11,6 +11,9 @@ export const SOUND_LABELS: Record<VideoSound, string> = {
   breaking: 'Breaking — tense, urgent pulse',
   documentary: 'Documentary — warm, cinematic',
   tech: 'Tech — bright, modern pulse',
+  afro: 'Afrobeat — lively, rhythmic',
+  lofi: 'Lo-fi — mellow, chilled',
+  anthem: 'Anthem — bold, inspiring',
 };
 
 // One enveloped oscillator note. Exponential ramps never hit 0, so they start/end at ~0.0001.
@@ -61,6 +64,12 @@ export function scheduleBed(ctx: AudioContext, out: AudioNode, sound: VideoSound
     documentary: { type: 'sine', freqs: [98, 146.83, 220, 246.94, 392], peak: 0.1 },
     // Bright modern chord with a faster pulse.
     tech: { type: 'triangle', freqs: [146.83, 220, 293.66, 440], peak: 0.08, pulse: 2.4 },
+    // Lively bright major with a groove-speed pulse (afrobeat-flavoured).
+    afro: { type: 'triangle', freqs: [164.81, 207.65, 246.94, 329.63], peak: 0.09, pulse: 2.8 },
+    // Mellow warm Cmaj7 pad with a slow sway.
+    lofi: { type: 'sine', freqs: [130.81, 164.81, 196, 246.94], peak: 0.1, pulse: 0.5 },
+    // Bold, wide major spread — inspiring.
+    anthem: { type: 'triangle', freqs: [98, 146.83, 196, 246.94, 392], peak: 0.1 },
   };
   const bed = beds[sound];
   if (!bed || bed.freqs.length === 0) {

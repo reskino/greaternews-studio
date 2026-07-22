@@ -7,7 +7,7 @@ import { resolveQuery } from './aiResolver';
 import { draftVideoBeats } from './videoBeats';
 import type { VideoMotion, VideoSound, VideoVoice } from './videoExport';
 import { exportCardVideo, videoExportSupported } from './videoExport';
-import { SOUND_LABELS } from './videoAudio';
+import { SOUND_LABELS, scheduleBed } from './videoAudio';
 
 type CardDesignerProps = {
   suggestedHeadline: string;
@@ -97,6 +97,8 @@ export default function CardDesigner({
   const [videoSound, setVideoSound] = useState<VideoSound>('newsroom');
   const [videoVoice, setVideoVoice] = useState<VideoVoice>('none');
   const [groqVoiceName, setGroqVoiceName] = useState('hannah'); // Orpheus voice when videoVoice==='groq'
+  const [previewingSound, setPreviewingSound] = useState(false);
+  const previewCtxRef = useRef<AudioContext | null>(null);
   const [format, setFormat] = useState<CardFormat>('portrait');
   const [photo, setPhoto] = useState<HTMLImageElement | null>(null);
   const [photoName, setPhotoName] = useState('');
@@ -494,6 +496,39 @@ export default function CardDesigner({
       // Leave existing images in place on failure.
     }
     setFetchingBeatImages(false);
+  }
+
+  function stopSoundPreview() {
+    if (previewCtxRef.current) {
+      void previewCtxRef.current.close();
+      previewCtxRef.current = null;
+    }
+    setPreviewingSound(false);
+  }
+
+  // Play the selected music bed for a few seconds so it can be judged before rendering a video.
+  function previewSound() {
+    stopSoundPreview();
+    if (videoSound === 'none' || typeof AudioContext === 'undefined') {
+      return;
+    }
+    try {
+      const ctx = new AudioContext();
+      previewCtxRef.current = ctx;
+      const master = ctx.createGain();
+      const seconds = 4;
+      master.gain.value = videoVoice === 'none' ? 0.4 : 0.2; // match the mix level used in the video
+      master.connect(ctx.destination);
+      scheduleBed(ctx, master, videoSound, seconds);
+      master.gain.setValueAtTime(master.gain.value, ctx.currentTime + seconds - 0.4);
+      master.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + seconds);
+      setPreviewingSound(true);
+      window.setTimeout(() => {
+        if (previewCtxRef.current === ctx) stopSoundPreview();
+      }, (seconds + 0.25) * 1000);
+    } catch {
+      stopSoundPreview();
+    }
   }
 
   async function downloadVideo() {
@@ -961,8 +996,13 @@ export default function CardDesigner({
               </select>
             </label>
             <label>
-              <span>Video sound</span>
-              <select value={videoSound} onChange={(event) => setVideoSound(event.target.value as VideoSound)}>
+              <span>
+                Video sound
+                <button type="button" className="link-button" onClick={() => (previewingSound ? stopSoundPreview() : previewSound())} disabled={videoSound === 'none'}>
+                  {previewingSound ? 'stop' : 'preview'}
+                </button>
+              </span>
+              <select value={videoSound} onChange={(event) => { stopSoundPreview(); setVideoSound(event.target.value as VideoSound); }}>
                 {(Object.keys(SOUND_LABELS) as VideoSound[]).map((key) => (
                   <option key={key} value={key}>
                     {SOUND_LABELS[key]}
