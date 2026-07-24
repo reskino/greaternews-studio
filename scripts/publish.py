@@ -77,6 +77,16 @@ def log_to_posted_log(item, run_date):
 
 # ---------- scheduling ----------
 
+def parse_duration(value):
+    """Seconds for an offset like '45m', '2h', '+3h', '1d'."""
+    text = str(value).strip().lstrip("+")
+    unit = text[-1].lower()
+    mult = {"m": 60, "h": 3600, "d": 86400}.get(unit)
+    if mult is None:
+        raise ValueError(f"bad duration '{value}' (use 45m, 2h, 1d)")
+    return float(text[:-1]) * mult
+
+
 def resolve_schedule(value):
     """Validate a scheduleAt value and return a future Unix timestamp.
 
@@ -252,6 +262,8 @@ def main():
     parser.add_argument("--check", action="store_true", help="validate credentials read-only, post nothing")
     parser.add_argument("--next", action="store_true", help="post only the next pending item")
     parser.add_argument("--all", action="store_true", help="post every pending item")
+    parser.add_argument("--schedule", metavar="OFFSET", help="auto-schedule pending items (Facebook) starting this far ahead, e.g. +2h — they land in Facebook's scheduled queue for review before going live")
+    parser.add_argument("--stagger", default="45m", help="gap between auto-scheduled items (default 45m)")
     args = parser.parse_args()
 
     if args.check:
@@ -273,8 +285,17 @@ def main():
     if args.dry_run or creds is None:
         if creds is None and not args.dry_run:
             print("No secrets.json found — running as dry-run. See PUBLISHING_SETUP.md to go live.\n")
-        for item in pending:
-            when = f" @ {item['scheduleAt']}" if item.get("scheduleAt") else ""
+        from datetime import datetime, timezone
+
+        base = int(time.time() + parse_duration(args.schedule)) if args.schedule else None
+        stagger = int(parse_duration(args.stagger)) if (base and args.stagger) else 0
+        for index, item in enumerate(pending):
+            if item.get("scheduleAt"):
+                when = f" @ {item['scheduleAt']}"
+            elif base:
+                when = " @ " + datetime.fromtimestamp(base + index * stagger, timezone.utc).isoformat() + " (auto)"
+            else:
+                when = ""
             print(f"[would post to {item['platform']}{when}] {item.get('image') or '(no image)'}")
             print(f"  {item['text'][:160]}{'…' if len(item['text']) > 160 else ''}\n")
         print(f"{len(pending)} item(s) pending.")
@@ -303,12 +324,21 @@ def main():
     posted = 0
     scheduled = 0
 
-    for item in to_post:
+    # --schedule auto-schedules items that don't already carry a scheduleAt, starting `--schedule`
+    # ahead and spaced by `--stagger` so a day's posts spread out instead of firing together.
+    from datetime import datetime, timezone
+
+    schedule_base = int(time.time() + parse_duration(args.schedule)) if args.schedule else None
+    stagger_sec = int(parse_duration(args.stagger)) if (schedule_base and args.stagger) else 0
+
+    for index, item in enumerate(to_post):
         platform = item["platform"]
         scheduled_ts = None
         try:
             if item.get("scheduleAt"):
                 scheduled_ts = resolve_schedule(item["scheduleAt"])
+            elif schedule_base:
+                scheduled_ts = schedule_base + index * stagger_sec
             if platform == "facebook":
                 post_id = publish_facebook(item, creds["facebook"], scheduled_ts)
             elif platform == "x":
@@ -321,9 +351,9 @@ def main():
             item["postId"] = post_id
             if scheduled_ts:
                 item["status"] = "scheduled"
-                item["scheduledFor"] = item["scheduleAt"]
+                item["scheduledFor"] = datetime.fromtimestamp(scheduled_ts, timezone.utc).isoformat()
                 scheduled += 1
-                print(f"SCHEDULED on {platform} for {item['scheduleAt']}: {post_id} — {item['text'][:50]}…")
+                print(f"SCHEDULED on {platform} for {item['scheduledFor']}: {post_id} — {item['text'][:50]}…")
             else:
                 item["status"] = "posted"
                 item["postedAt"] = time.strftime("%Y-%m-%dT%H:%M:%S")

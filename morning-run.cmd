@@ -14,6 +14,6 @@ echo ----- rendering card assets ----- >> C:\GreaterNews\content\morning-run.log
 python C:\GreaterNews\scripts\render_assets.py >> C:\GreaterNews\content\morning-run.log 2>&1
 echo ----- stopping local resolver ----- >> C:\GreaterNews\content\morning-run.log
 powershell -NoProfile -Command "Get-NetTCPConnection -LocalPort 5199 -State Listen -ErrorAction SilentlyContinue | Select-Object -Expand OwningProcess -Unique | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }" >> C:\GreaterNews\content\morning-run.log 2>&1
-echo ----- publish queue status ----- >> C:\GreaterNews\content\morning-run.log
-python C:\GreaterNews\scripts\publish.py --dry-run >> C:\GreaterNews\content\morning-run.log 2>&1
+echo ----- scheduling posts on Facebook (2h out, review/delete before they go live) ----- >> C:\GreaterNews\content\morning-run.log
+python C:\GreaterNews\scripts\publish.py --all --schedule +2h >> C:\GreaterNews\content\morning-run.log 2>&1
 echo ===== GreaterNews morning run finished %date% %time% ===== >> C:\GreaterNews\content\morning-run.log
