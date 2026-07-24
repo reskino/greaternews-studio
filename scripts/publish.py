@@ -37,6 +37,7 @@ if hasattr(sys.stdout, "reconfigure"):
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SECRETS_PATH = os.path.join(ROOT, "secrets.json")
 GRAPH = "https://graph.facebook.com/v21.0"
+GRAPH_VIDEO = "https://graph-video.facebook.com/v21.0"  # video uploads use the video host
 
 
 def load_secrets():
@@ -123,11 +124,32 @@ def resolve_schedule(value):
 def publish_facebook(item, creds, scheduled_ts=None):
     page_id = creds["page_id"]
     token = creds["page_token"]
+    video = item.get("video")
     image = item.get("image")
 
-    data = {"message": item["text"], "access_token": token}
     # A scheduled post is created unpublished with a future publish time; Facebook
     # then publishes it server-side, so this machine need not be running at that time.
+
+    # Video story → upload the clip as a video post (the text becomes the description).
+    if video:
+        video_path = os.path.join(ROOT, "content", video)
+        if not os.path.exists(video_path):
+            raise FileNotFoundError(f"video not found: {video_path}")
+        vdata = {"description": item["text"], "access_token": token}
+        if scheduled_ts:
+            vdata["published"] = "false"
+            vdata["scheduled_publish_time"] = str(scheduled_ts)
+        with open(video_path, "rb") as handle:
+            response = requests.post(
+                f"{GRAPH_VIDEO}/{page_id}/videos",
+                data=vdata,
+                files={"source": handle},
+                timeout=300,
+            )
+        response.raise_for_status()
+        return response.json().get("id", "")
+
+    data = {"message": item["text"], "access_token": token}
     if scheduled_ts:
         data["published"] = "false"
         data["scheduled_publish_time"] = str(scheduled_ts)
@@ -296,7 +318,8 @@ def main():
                 when = " @ " + datetime.fromtimestamp(base + index * stagger, timezone.utc).isoformat() + " (auto)"
             else:
                 when = ""
-            print(f"[would post to {item['platform']}{when}] {item.get('image') or '(no image)'}")
+            media = f"VIDEO {item['video']}" if item.get("video") else (item.get("image") or "(no media)")
+            print(f"[would post to {item['platform']}{when}] {media}")
             print(f"  {item['text'][:160]}{'…' if len(item['text']) > 160 else ''}\n")
         print(f"{len(pending)} item(s) pending.")
         return
