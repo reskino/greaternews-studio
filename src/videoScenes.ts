@@ -180,15 +180,15 @@ function drawBeatContent(ctx: Ctx, options: CardOptions, beat: Beat, width: numb
   const hasLabel = beat.label.length > 0;
   const kickerBlock = hasLabel ? kickerFont * 1.2 + Math.round(height * 0.02) : 0;
 
-  // Captions are short (a few words), so start large and let fitText shrink only long ones.
+  // Captions are short phrases; start large and let fitText shrink/wrap longer ones (up to 3 lines).
   const fit = fitText(ctx, beat.text, {
     maxWidth: width * 0.86,
-    maxHeight: height * 0.4,
-    baseFont: Math.round(width * 0.11),
-    minFont: Math.round(width * 0.05),
+    maxHeight: height * 0.46,
+    baseFont: Math.round(width * 0.088),
+    minFont: Math.round(width * 0.044),
     maxLines: 3,
     weight: 800,
-    factor: 1.12,
+    factor: 1.14,
   });
 
   const groupTop = (height - (kickerBlock + fit.height)) / 2 + Math.round(height * 0.02);
