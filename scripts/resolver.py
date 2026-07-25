@@ -48,7 +48,7 @@ You are given a headline, a line of context, and sometimes fuller story details.
 
 For EACH beat return four fields:
 - "label": a 1-3 word ALL-CAPS section tag (e.g. THE STORY, THE DETAIL, THE NUMBERS, WHO, WHY IT MATTERS, WHAT'S NEXT, THE SOURCE).
-- "caption": the on-screen text for the slide - a punchy line of up to about 10 words (a short phrase or clause with a bit of substance, not a full sentence), no ending period.
+- "caption": the on-screen text for the slide - AIM FOR 6 to 10 words and pack in the key specific detail (a name, number, place or outcome). Do NOT return a vague 2-3 word label like "Economic growth"; and do NOT write a full sentence. No ending period.
 - "say": what the presenter SAYS for this beat - ONE natural, flowing spoken sentence of about 18 to 28 words. Use active voice and broadcast cadence, lead with the news, vary how each sentence opens, one idea per beat. Write numbers, money and dates the way they are SPOKEN (e.g. "three hundred sixty million dollars"), and expand an acronym the first time it is said. No filler, no hedging.
 - "image": a concrete, searchable photo subject to show behind this beat - a real person, place, building, organisation or object, Ghana-aware. Use "" if nothing safe or relevant (tragedy, crime victims, private individuals).
 
