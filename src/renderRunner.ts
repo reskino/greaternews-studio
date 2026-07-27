@@ -4,7 +4,7 @@
 import type { CardFormat, CardOptions, CardTemplate, ChipLabel } from './cardEngine';
 import { drawCard, formatSizes } from './cardEngine';
 import { fetchArticleImage } from './article';
-import { findBestPhoto, loadImage, loadImageWithProxyFallback } from './imageSearch';
+import { findBestPhoto, loadImage, loadImageWithProxyFallback, neutralJusticeQuery } from './imageSearch';
 import { exportCardVideo, videoExportSupported } from './videoExport';
 import type { VideoSound } from './videoExport';
 
@@ -111,6 +111,18 @@ async function run() {
           photo = await loadImageWithProxyFallback(card.photoUrl);
         } catch {
           log(`${card.slug}: photo failed to load, rendering without it`, 'err');
+        }
+      }
+
+      // Sensitive crime/court/tragedy story: use neutral justice imagery (gavel/courthouse), never
+      // the people involved — overrides articleUrl/photoQuery unless an explicit photoUrl was given.
+      const justiceQuery = neutralJusticeQuery(card.headline ?? '');
+      if (!photo && justiceQuery) {
+        const best = await findBestPhoto(justiceQuery).catch(() => null);
+        if (best) {
+          photo = best.image;
+          photoCredit = best.credit;
+          log(`${card.slug}: sensitive story — neutral justice image (${best.credit})`, 'ok');
         }
       }
 

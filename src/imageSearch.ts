@@ -122,6 +122,12 @@ const justiceStoryMarkers = /\b(jail(ed)?|sentenc|court|convict|guilty|charg(e|e
 // Safe, non-identifying justice/newsroom imagery for any sensitive crime/court/tragedy story.
 const NEUTRAL_JUSTICE_QUERIES = ['court gavel', 'courthouse building', 'scales of justice', 'Ghana Police Service', 'prison'];
 
+// For the render pipeline: a neutral justice photo subject when a headline is a crime/court/tragedy
+// story (so auto-generated cards never depict the people involved), else null.
+export function neutralJusticeQuery(headline: string): string | null {
+  return sensitiveMarkers.test(headline) || justiceStoryMarkers.test(headline) ? 'court gavel justice' : null;
+}
+
 // A disambiguated, Ghana-aware plan for finding a licensed photo. Produced either by the
 // Claude resolver (aiResolver.ts) or the key-free heuristic below; both feed the same search.
 export type SearchPlan = {
