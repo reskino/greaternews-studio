@@ -116,7 +116,11 @@ const acronymClashes: Record<string, string[]> = {
   gps: ['satellite', 'navigation', 'Global Positioning'],
 };
 
-const sensitiveMarkers = /\b(dead|death|died|killed|murder|rape|raped|victim|accident|suicide|corpse|bodies|body|minor|abuse)s?\b/i;
+const sensitiveMarkers = /\b(dead|death|died|killed|murder|rape|raped|victim|accident|suicide|corpse|bodies|body|minor|abuse|defil(e|ed|ing)|molest)s?\b/i;
+// Crime / court stories: depict the justice system, never the people involved.
+const justiceStoryMarkers = /\b(jail(ed)?|sentenc|court|convict|guilty|charg(e|ed)|trial|arrest|prosecut|remand|verdict|fraud|theft|robbery|assault|galamsey|smuggl)s?\b/i;
+// Safe, non-identifying justice/newsroom imagery for any sensitive crime/court/tragedy story.
+const NEUTRAL_JUSTICE_QUERIES = ['court gavel', 'courthouse building', 'scales of justice', 'Ghana Police Service', 'prison'];
 
 // A disambiguated, Ghana-aware plan for finding a licensed photo. Produced either by the
 // Claude resolver (aiResolver.ts) or the key-free heuristic below; both feed the same search.
@@ -346,6 +350,19 @@ export type StoryImageSearch = {
 // Multi-strategy story image search: entity lead images from Wikipedia first (most likely to be
 // "the correct photo of the thing"), then Commons and Openverse keyword matches, then a category anchor.
 export async function findStoryImages(headline: string, category: string): Promise<StoryImageSearch> {
+  // Crime / court / tragedy stories: never depict a person, victim, minor, or the act itself.
+  // Steer to neutral justice symbolism (courthouse, gavel, scales, police) instead of a name or
+  // the category's parliament/entity anchor.
+  if (sensitiveMarkers.test(headline) || justiceStoryMarkers.test(headline)) {
+    const settled = await Promise.allSettled([
+      ...NEUTRAL_JUSTICE_QUERIES.map((query) => searchCommons(query)),
+      searchOpenverse('gavel justice court'),
+      searchOpenverse('courthouse'),
+    ]);
+    const results = dedupeResults(settled.flatMap((result) => (result.status === 'fulfilled' ? result.value : []))).slice(0, 18);
+    return { results, queries: NEUTRAL_JUSTICE_QUERIES };
+  }
+
   const entities = extractEntities(headline);
   const anchor = categoryQueries[category] ?? '';
   const needsGhanaBias = ghanaCategories.has(category) && !ghanaMarkers.test(headline);
