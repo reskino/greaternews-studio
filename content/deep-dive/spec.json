@@ -1,30 +1,29 @@
 {
-  "slug": "hormuz",
+  "slug": "us-iran-conflict-timeline-and-global-imp",
   "captions": "highlight",
   "music": "generated",
   "voice": "groq",
   "groq_voice": "hannah",
   "post": {
-    "caption": "📉 One narrow stretch of sea between Iran and Oman — the Strait of Hormuz — has pushed oil past $100 and moved the price at Ghana's pumps. Here's what's happening, and why you feel it. 🇬🇭",
-    "body": "About a fifth of the world's oil sails through a channel just ~33km wide. Fighting there sent crude up ~40% in three weeks — and Ghana, which buys fuel in dollars, saw petrol climb to about GH¢14.52 a litre from July 16.",
+    "caption": "🛢️ A war that started in the Gulf in February has shut the world's busiest oil route — and it's landing at Ghana's fuel pumps. Here's the timeline, and why you feel it. 🇬🇭",
+    "body": "The US–Iran war closed the Strait of Hormuz, which carries about a fifth of the world's oil, and shipping there has collapsed from ~100 vessels a day to under 10. Ghana imports ~70% of its fuel in dollars — so petrol climbed to about GH¢13.30 a litre and inflation rose for the first time in 16 months.",
     "sources": [
-      {"name": "U.S. EIA (oil chokepoints)", "url": "https://www.eia.gov/international/content/analysis/special_topics/World_Oil_Transit_Chokepoints/"},
-      {"name": "CNN (oil tops $100)", "url": "https://www.cnn.com/2026/07/23/world/live-news/iran-war-trump"},
-      {"name": "CNBC (US–Iran, Hormuz)", "url": "https://www.cnbc.com/2026/07/21/us-iran-war-trump-hormuz-houthis.html"},
-      {"name": "MyJoyOnline (Ghana fuel, Jul 16)", "url": "https://www.myjoyonline.com/fuel-prices-set-to-rise-from-july-16-petrol-likely-to-be-sold-at-gh%C2%A214-52-diesel-gh%C2%A216/"},
-      {"name": "Citi Newsroom (Ghana fuel)", "url": "https://www.citinewsroom.com/2026/07/fuel-prices-to-go-up-from-july-16/"},
-      {"name": "ABC News GH (Hormuz → Ghana)", "url": "https://abcnewsgh.com/irans-closure-of-strait-of-hormuz-raises-threat-of-fuel-price-hikes-in-ghana/"}
+      {"name": "Wikipedia (fuel crisis — Hormuz ~20% of world oil, Brent prices, IEA)", "url": "https://en.wikipedia.org/wiki/2026_Iran_war_fuel_crisis"},
+      {"name": "CNN (Hormuz shipping collapse; strike pause, late July)", "url": "https://www.cnn.com/2026/07/25/world/live-news/iran-war-trump"},
+      {"name": "Al Jazeera (war cost $37.5bn, Jul 22)", "url": "https://www.aljazeera.com/news/liveblog/2026/7/22/iran-war-live-us-launches-new-attacks-hegseth-says-war-has-cost-37-5bn"},
+      {"name": "CNBC Africa (Ghana fuel prices & tax cut)", "url": "https://www.cnbcafrica.com/2026/ghana-to-cut-fuel-taxes-and-levies-as-iran-conflict-drives-up-pump-prices"},
+      {"name": "TIME (Africa's energy weakness, Jul 28)", "url": "https://time.com/article/2026/07/28/the-iran-war-exposed-africa-s-biggest-energy-weakness/"}
     ],
-    "cta": "🔔 Follow GreaterNews for the stories behind the headlines — news you can trust.",
-    "hashtags": ["#GreaterNews", "#Ghana", "#StraitOfHormuz", "#FuelPrices", "#OilPrices", "#Explainer"]
+    "cta": "Follow GreaterNews - news you can trust.",
+    "hashtags": ["#GreaterNews", "#Ghana", "#Explainer", "#Iran", "#OilPrices"]
   },
   "chapters": [
-    {"say": "One thin stretch of water between Iran and Oman just pushed up the price of petrol at your pump. Here is what is happening.", "visual": {"type": "broll", "query": "container ship ocean aerial"}},
-    {"say": "The Strait of Hormuz is the world's most important oil gateway, only about thirty three kilometres wide at its narrowest point.", "visual": {"type": "still", "query": "Strait of Hormuz map"}},
-    {"say": "Roughly one in five barrels of the world's oil sails through here every single day. And if it closes, there is almost no other way out.", "visual": {"type": "broll", "query": "oil tanker sea"}},
-    {"say": "In late July, Iran attacked a tanker and effectively closed the strait, while United States strikes and Red Sea attacks widened the conflict.", "visual": {"type": "broll", "query": "navy warship ocean"}},
-    {"say": "Crude oil shot past one hundred dollars a barrel, up about forty percent in just three weeks.", "visual": {"type": "still", "query": "oil refinery industry"}},
-    {"say": "Ghana buys its fuel in dollars off that same global market. So petrol has climbed to around fourteen cedis, fifty two a litre, with diesel near sixteen.", "visual": {"type": "still", "query": "Shell fuel station Ghana Accra"}},
-    {"say": "Whether prices ease now depends on a fragile ceasefire holding. We will keep following this story. Follow GreaterNews, news you can trust.", "visual": {"type": "broll", "query": "gas station night city"}}
+    {"say": "A war that began in the Gulf in February has now closed the world's key oil route and reached all the way to Ghana's fuel pumps.", "visual": {"type": "broll", "query": "oil tanker at sea aerial"}},
+    {"say": "The United States and Israel launched strikes on Iran on the twenty eighth of February, killing Supreme Leader Ali Khamenei and igniting a regional war.", "visual": {"type": "still", "query": "Middle East political map Iran"}},
+    {"say": "The fighting shut the Strait of Hormuz, the narrow channel that carries about one fifth of the world's oil, with almost no alternative route.", "visual": {"type": "still", "query": "Strait of Hormuz map"}},
+    {"say": "A ceasefire agreed in April collapsed in July after Iran attacked commercial ships, and United States bombing then ran for thirteen straight nights.", "visual": {"type": "broll", "query": "navy warship at sea"}},
+    {"say": "Fewer than ten ships now pass through Hormuz each day, down from about one hundred, and oil has swung back near one hundred dollars a barrel.", "visual": {"type": "still", "query": "oil refinery at sunset"}},
+    {"say": "Ghana imports about seventy percent of its fuel, so petrol climbed near thirteen cedis a litre and inflation rose for the first time in sixteen months.", "visual": {"type": "still", "query": "petrol station Accra Ghana"}},
+    {"say": "By late July the United States had paused its strikes, but with talks stalled, whether Ghana's prices ease depends on a fragile calm holding.", "visual": {"type": "broll", "query": "gas station pump night city"}}
   ]
 }

@@ -18,6 +18,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 
 import requests
 from PIL import Image, ImageDraw, ImageFont
@@ -74,15 +75,46 @@ def eleven_timestamps(text, mp3_path):
 
 def groq_tts(text, path, voice_name=None):
     c = SECRETS["groq"]
-    r = requests.post(
-        "https://api.groq.com/openai/v1/audio/speech",
-        headers={"Authorization": f"Bearer {c['api_key']}", "Content-Type": "application/json"},
-        json={"model": c.get("tts_model", "canopylabs/orpheus-v1-english"), "input": text,
-              "voice": voice_name or c.get("tts_voice", "hannah"), "response_format": "wav"},
-        timeout=120,
-    )
-    r.raise_for_status()
-    open(path, "wb").write(r.content)
+    for attempt in range(6):
+        r = requests.post(
+            "https://api.groq.com/openai/v1/audio/speech",
+            headers={"Authorization": f"Bearer {c['api_key']}", "Content-Type": "application/json"},
+            json={"model": c.get("tts_model", "canopylabs/orpheus-v1-english"), "input": text,
+                  "voice": voice_name or c.get("tts_voice", "hannah"), "response_format": "wav"},
+            timeout=120,
+        )
+        if r.status_code == 429 and attempt < 5:
+            wait = float(r.headers.get("retry-after", 0))
+            if wait > 90:  # daily quota, not a short throttle -> give up so caller can fall back
+                raise RuntimeError(f"Groq TTS quota exhausted (resets in ~{int(wait / 60)} min)")
+            wait = wait or (6 * (attempt + 1))
+            print(f"    (Groq rate-limited; waiting {int(wait)}s and retrying)")
+            time.sleep(min(wait, 40))
+            continue
+        r.raise_for_status()
+        open(path, "wb").write(r.content)
+        return
+
+
+def windows_tts(text, path):
+    """Offline stopgap voice (Windows SAPI) — no quota. Lower quality than Groq/ElevenLabs."""
+    tf = path + ".txt"
+    with open(tf, "w", encoding="utf-8") as h:
+        h.write(text)
+    ps = (
+        "$t=[IO.File]::ReadAllText('{txt}');Add-Type -AssemblyName System.Speech;"
+        "$s=New-Object System.Speech.Synthesis.SpeechSynthesizer;"
+        "$f=$s.GetInstalledVoices()|?{{$_.VoiceInfo.Gender -eq 'Female' -and $_.Enabled}}|select -First 1;"
+        "if($f){{$s.SelectVoice($f.VoiceInfo.Name)}};$s.Rate=-1;"
+        "$s.SetOutputToWaveFile('{wav}');$s.Speak($t);$s.Dispose()"
+    ).format(txt=tf.replace("'", "''"), wav=path.replace("'", "''"))
+    pwsh = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"),
+                        "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
+    if not os.path.exists(pwsh):
+        pwsh = "powershell"
+    subprocess.run([pwsh, "-NoProfile", "-Command", ps],
+                   check=True, stdin=subprocess.DEVNULL, creationflags=NO_WINDOW)
+    os.remove(tf)
 
 
 def approx_words(text, total):
@@ -111,14 +143,18 @@ def approx_words(text, total):
 
 
 def synthesize(text, path, voice, groq_voice=None):
-    """ElevenLabs (word-accurate captions) if available, else Groq voice with estimated timing."""
+    """ElevenLabs (word-accurate) -> Groq voice -> offline Windows voice. Never hard-fails on TTS."""
     if voice == "elevenlabs":
         try:
             chars, starts, ends = eleven_timestamps(text, path)
             return words_from_alignment(chars, starts, ends)
         except Exception as e:
             print(f"  (ElevenLabs unavailable: {str(e)[:50]} -> Groq voice)")
-    groq_tts(text, path, groq_voice)
+    try:
+        groq_tts(text, path, groq_voice)
+    except Exception as e:
+        print(f"  (Groq voice unavailable: {str(e)[:70]} -> offline Windows voice)")
+        windows_tts(text, path)
     return approx_words(text, duration(path))
 
 
