@@ -444,7 +444,9 @@ def build(spec):
                 vin = ["-loop", "1", "-i", asset]
                 p = f"min(1,t/{dur:.3f})"
                 ease = f"(0.5-0.5*cos(PI*{p}))"                 # ease in and out
-                xexpr = f"(iw-2160)*{ease}" if i % 2 == 0 else f"(iw-2160)*(1-{ease})"  # alt L<->R
+                travel = 0.7                                    # pan across 70% of the width (gentler)
+                xexpr = (f"(iw-2160)*(0.5+{travel}*({ease}-0.5))" if i % 2 == 0
+                         else f"(iw-2160)*(0.5-{travel}*({ease}-0.5))")  # alt L<->R, centred
                 bg_fc = (f"[0:v]scale=-2:3840,crop=2160:3840:x='{xexpr}':y=0,"
                          f"scale={W}:{H},setsar=1[bg]")
             else:  # very tall image: fit the whole thing over a blurred fill, ease-out zoom
