@@ -107,18 +107,25 @@ def groq_curate(stories, want=6):
         f"{i}. [{s['bucket']}] {s['title']} - {s.get('source', '')}"
         for i, s in enumerate(stories))
     system = (
-        "You are the commissioning editor for GreaterNews, a Ghana-first channel that makes "
-        "90-second REFERENCED explainer videos on big world and African stories. You judge which "
-        "headlines would make the STRONGEST explainer: real depth and stakes, global significance, "
-        "and ideally a Ghana or Africa angle (strong world stories still count). Avoid thin celebrity/"
-        "gossip items and bare sports scores.")
+        "You are the commissioning editor for GreaterNews, a GHANA-FIRST channel making 90-second "
+        "REFERENCED explainer videos. The audience is Ghanaian, so rank headlines by how well each makes "
+        "a strong explainer FOR THAT AUDIENCE.\n"
+        "STRONGLY PREFER (score 8-10): a clear Ghana or Africa angle; or a big global story that hits "
+        "Ghanaian life — fuel/energy prices, the cedi and economy, food prices, jobs, health and disease "
+        "outbreaks, security, migration, or major technology that changes daily life.\n"
+        "ALLOW (score 5-7): major world events with clear global stakes even without a direct Ghana link.\n"
+        "REJECT (score 1-3, keep OUT of the picks): bare sports results/scores/transfers, celebrity and "
+        "entertainment gossip, royal/lifestyle fluff, clickbait listicles, minor local crime, and anything "
+        "with no real depth or stakes.\n"
+        "Every pick must have a genuine 'why a Ghanaian should care' — say it in the angle.")
     user = (
         "Headlines:\n" + listing + "\n\nReturn JSON of the form "
         '{"picks":[{"index":<int from the list>,"score":<1-10>,'
-        '"angle":"the Ghana/Africa or global angle in a few words",'
+        '"angle":"why a Ghanaian should care (Ghana/Africa link, or the global stake) in a few words",'
         '"why_now":"one short sentence on why it matters now",'
         '"topic":"a specific research query to brief this story"}]} '
-        "with the " + str(want) + " best, best first.")
+        "with up to " + str(want) + " picks, best first. Include ONLY stories worth a full explainer "
+        "(score 5 or higher) — skip thin sports/celebrity items entirely, even if it means fewer picks.")
     try:
         r = requests.post(
             "https://api.groq.com/openai/v1/chat/completions",
