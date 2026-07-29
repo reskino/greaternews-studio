@@ -433,23 +433,36 @@ def build(spec):
         if vis["type"] == "broll" and asset:
             vin = ["-stream_loop", "-1", "-i", asset]
             bg_fc = f"[0:v]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},setsar=1[bg]"
-        elif asset:  # still: fit the WHOLE image over a blurred fill, with ease-out Ken Burns
+        elif asset:  # still: pan WIDE images side-to-side (clean, full-frame); blurred-fill for tall ones
             n_frames = max(1, int(dur * 30))
-            vin = ["-i", asset]
-            peak = 1.22
-            t = f"min(1,on/{max(1, n_frames - 1)})"          # 0..1 progress
-            ease = f"(1-pow(1-{t},2))"                        # ease-out: moves fast, then settles at peak
-            z = (f"(1.0+{peak - 1.0:.3f}*{ease})" if i % 2 == 0
-                 else f"({peak:.3f}-{peak - 1.0:.3f}*{ease})")  # alternate zoom in / out, then hold
-            kb = (f"zoompan=z='{z}':d={n_frames}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
-                  f":s={W}x{H}:fps=30")
-            bg_fc = (                                          # blurred cover behind the fully-fit image
-                "[0:v]split=2[kbb][kbf];"
-                "[kbb]scale=2160:3840:force_original_aspect_ratio=increase,crop=2160:3840,"
-                "boxblur=30:2,eq=brightness=-0.10[kbg];"
-                "[kbf]scale=2160:3840:force_original_aspect_ratio=decrease[kfg];"
-                f"[kbg][kfg]overlay=(W-w)/2:(H-h)/2,{kb},setsar=1[bg]"
-            )
+            try:
+                with Image.open(asset) as _im:
+                    wide = (_im.width / _im.height) > (W / H)  # wider than the 9:16 frame
+            except Exception:
+                wide = False
+            if wide:  # fill the height, slowly pan across the full width (no blur, no crop loss)
+                vin = ["-loop", "1", "-i", asset]
+                p = f"min(1,t/{dur:.3f})"
+                ease = f"(0.5-0.5*cos(PI*{p}))"                 # ease in and out
+                xexpr = f"(iw-2160)*{ease}" if i % 2 == 0 else f"(iw-2160)*(1-{ease})"  # alt L<->R
+                bg_fc = (f"[0:v]scale=-2:3840,crop=2160:3840:x='{xexpr}':y=0,"
+                         f"scale={W}:{H},setsar=1[bg]")
+            else:  # very tall image: fit the whole thing over a blurred fill, ease-out zoom
+                vin = ["-i", asset]
+                peak = 1.22
+                t = f"min(1,on/{max(1, n_frames - 1)})"
+                ease = f"(1-pow(1-{t},2))"
+                z = (f"(1.0+{peak - 1.0:.3f}*{ease})" if i % 2 == 0
+                     else f"({peak:.3f}-{peak - 1.0:.3f}*{ease})")
+                kb = (f"zoompan=z='{z}':d={n_frames}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
+                      f":s={W}x{H}:fps=30")
+                bg_fc = (
+                    "[0:v]split=2[kbb][kbf];"
+                    "[kbb]scale=2160:3840:force_original_aspect_ratio=increase,crop=2160:3840,"
+                    "boxblur=30:2,eq=brightness=-0.10[kbg];"
+                    "[kbf]scale=2160:3840:force_original_aspect_ratio=decrease[kfg];"
+                    f"[kbg][kfg]overlay=(W-w)/2:(H-h)/2,{kb},setsar=1[bg]"
+                )
         else:
             vin = ["-f", "lavfi", "-i", f"color=c=0x0b0b0d:s={W}x{H}:r=30"]
             bg_fc = f"[0:v]scale={W}:{H},setsar=1[bg]"
