@@ -181,9 +181,13 @@ def write_ass(words, path, style="word"):
     open(path, "w", encoding="utf-8").write(header + "\n".join(lines) + "\n")
 
 
+NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)  # don't flash console windows on Windows
+
+
 def duration(path):
     return float(subprocess.check_output(
-        ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=nk=1:nw=1", path], text=True
+        ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=nk=1:nw=1", path],
+        text=True, stdin=subprocess.DEVNULL, creationflags=NO_WINDOW
     ).strip())
 
 
@@ -279,7 +283,8 @@ def pexels_video(q, path):
 
 
 def ffmpeg(args, cwd=None):
-    subprocess.run(["ffmpeg", "-y", "-loglevel", "error"] + args, check=True, cwd=cwd)
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error"] + args, check=True, cwd=cwd,
+                   stdin=subprocess.DEVNULL, creationflags=NO_WINDOW)
 
 
 def concat_reencode(segments, out):

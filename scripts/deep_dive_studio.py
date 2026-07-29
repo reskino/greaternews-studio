@@ -33,8 +33,12 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 
+NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)  # don't flash console windows on Windows
+
+
 def run(cmd):
-    p = subprocess.run([sys.executable] + cmd, cwd=ROOT, capture_output=True, text=True)
+    p = subprocess.run([sys.executable] + cmd, cwd=ROOT, capture_output=True, text=True,
+                       stdin=subprocess.DEVNULL, creationflags=NO_WINDOW)
     return p.returncode, (p.stdout or "") + (p.stderr or "")
 
 
@@ -255,9 +259,13 @@ async function build(){await save();flash('Building… (1–2 min, TTS + b-roll 
  if(j.ok){const v=$('vid');v.style.display='block';v.src='/video?'+Date.now();v.load();flash('Done — preview above.','ok');}}
 async function schedule(){if(!confirm('Queue + schedule this to Facebook (2h out, reviewable in FB first)?'))return;
  await save();flash('Scheduling…');const r=await fetch('/schedule',{method:'POST'});const j=await r.json();flash(j.log.split('\n').slice(-10).join('\n'), j.ok?'ok':'x');}
-async function research(){const t=$('topic').value.trim();if(!t)return;const rl=$('rlog');rl.style.display='block';rl.textContent='Researching "'+t+'"… (a few minutes)';
- const r=await fetch('/research',{method:'POST',body:JSON.stringify({topic:t})});const j=await r.json();rl.textContent=j.log.split('\n').slice(-12).join('\n');
- if(j.ok){await refresh();rl.textContent+='\nDone — brief + chapters loaded. Review, then Build.';}}
+async function research(){const t=$('topic').value.trim();if(!t)return;const rl=$('rlog');rl.style.display='block';
+ let sec=0;const tick=()=>{rl.textContent='🔎 Researching "'+t+'" … '+sec+'s  (usually 1–3 min: searching the web + writing the cited brief)';};tick();
+ const timer=setInterval(()=>{sec++;tick();},1000);
+ try{const r=await fetch('/research',{method:'POST',body:JSON.stringify({topic:t})});const j=await r.json();clearInterval(timer);
+  if(j.ok){await refresh();rl.textContent='✅ Done in '+sec+'s — brief + chapters loaded below. Review them, then Build.';}
+  else{rl.textContent='❌ Research did not finish.\n'+((j.log||'').split('\n').slice(-8).join('\n'));}}
+ catch(e){clearInterval(timer);rl.textContent='❌ Research failed: '+e;}}
 function srcMeta(s){return `<div class=small>${s.source||''}${s.date?' · '+s.date:''}${s.link?` · <a href="${s.link}" target=_blank rel=noopener>open</a>`:''}</div>`;}
 async function hot(){const el=$('hotlist');el.style.display='block';el.innerHTML='<span class=small>Scanning headlines and ranking them for explainers…</span>';
  let j;try{j=await (await fetch('/curate')).json();}catch(e){el.innerHTML='<span class=x>Search failed.</span>';return;}
@@ -385,8 +393,13 @@ class H(BaseHTTPRequestHandler):
             f"why it matters, why now, the numbers, the local impact, what's next. Facts only from your sources."
         )
         try:
-            p = subprocess.run(["claude", "-p", prompt, "--allowedTools", "Read,Write,WebSearch,WebFetch,Glob,Grep"],
-                               cwd=ROOT, capture_output=True, text=True, timeout=900)
+            p = subprocess.run(
+                ["claude", "-p", prompt,
+                 "--permission-mode", "bypassPermissions",
+                 "--output-format", "text",
+                 "--allowedTools", "Read,Write,WebSearch,WebFetch,Glob,Grep"],
+                cwd=ROOT, capture_output=True, text=True, timeout=900,
+                stdin=subprocess.DEVNULL, creationflags=NO_WINDOW)
             ok = p.returncode == 0 and os.path.exists(SPEC)
             return self._send(200, json.dumps({"ok": ok, "log": (p.stdout or "")[-1200:] + (p.stderr or "")[-400:]}))
         except Exception as e:
