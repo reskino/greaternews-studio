@@ -1,0 +1,20 @@
+{
+  "slug": "hormuz",
+  "captions": "highlight",
+  "music": "generated",
+  "voice": "groq",
+  "groq_voice": "hannah",
+  "post": {
+    "caption": "📉 One narrow stretch of sea between Iran and Oman — the Strait of Hormuz — has pushed oil past $100 and moved the price at Ghana's pumps. Here's what's happening, and why you feel it. 🇬🇭",
+    "sources": ["EIA", "CNN", "CNBC", "MyJoyOnline", "Citi", "NPA"]
+  },
+  "chapters": [
+    {"say": "One thin stretch of water between Iran and Oman just pushed up the price of petrol at your pump. Here is what is happening.", "visual": {"type": "broll", "query": "container ship ocean aerial"}},
+    {"say": "The Strait of Hormuz is the world's most important oil gateway, only about thirty three kilometres wide at its narrowest point.", "visual": {"type": "still", "query": "Strait of Hormuz map"}},
+    {"say": "Roughly one in five barrels of the world's oil sails through here every single day. And if it closes, there is almost no other way out.", "visual": {"type": "broll", "query": "oil tanker sea"}},
+    {"say": "In late July, Iran attacked a tanker and effectively closed the strait, while United States strikes and Red Sea attacks widened the conflict.", "visual": {"type": "broll", "query": "navy warship ocean"}},
+    {"say": "Crude oil shot past one hundred dollars a barrel, up about forty percent in just three weeks.", "visual": {"type": "still", "query": "oil refinery industry"}},
+    {"say": "Ghana buys its fuel in dollars off that same global market. So petrol has climbed to around fourteen cedis, fifty two a litre, with diesel near sixteen.", "visual": {"type": "still", "query": "Shell fuel station Ghana Accra"}},
+    {"say": "Whether prices ease now depends on a fragile ceasefire holding. We will keep following this story. Follow GreaterNews, news you can trust.", "visual": {"type": "broll", "query": "gas station night city"}}
+  ]
+}

@@ -6,3 +6,13 @@ greaternews-studio-site.zip
 .env.local
 content/*/assets/
 secrets.json
+# Deep Dive + media artifacts (regenerated; keep the specs/briefs, not the binaries)
+content/deep-dive/*.mp4
+content/deep-dive/_*.png
+content/queue_deepdive_*.json
+content/voice-samples/
+content/ads/
+public/music/*.mp3
+public/music/*.m4a
+public/music/*.wav
+public/music/*.ogg
