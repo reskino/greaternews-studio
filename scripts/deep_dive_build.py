@@ -236,20 +236,37 @@ def duration(path):
 
 
 def brand_header(path):
-    """Transparent overlay: GREATERNEWS wordmark + GN logo in a rounded badge (as before)."""
+    """Transparent overlay: a single centered lockup — GN badge beside the GREATERNEWS wordmark,
+    with a soft shadow so it stays legible over light images."""
     img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
-    d.text((W / 2, int(H * 0.052)), "G R E A T E R N E W S", font=font(int(W * 0.03)), fill=(255, 255, 255, 210), anchor="mm")
-    s, m = int(W * 0.11), int(W * 0.05)
-    x, y = W - m - s, int(H * 0.028)
-    d.rounded_rectangle([x, y, x + s, y + s], radius=int(s * 0.24), outline=(255, 255, 255, 235), width=5)
+
+    cy = int(H * 0.060)                       # lockup centre-line, nudged down for safe margins
+    text = "G R E A T E R N E W S"
+    fs = int(W * 0.033)
+    wm = font(fs)
+    tb = d.textbbox((0, 0), text, font=wm)
+    tw = tb[2] - tb[0]
+    s = int(fs * 2.0)                         # badge sized to sit inline with the wordmark
+    gap = int(W * 0.020)
+    x0 = (W - (s + gap + tw)) // 2            # left edge of the whole lockup -> centred
+
+    bx, by = x0, cy - s // 2                   # badge
+    d.rounded_rectangle([bx + 3, by + 3, bx + s + 3, by + s + 3],
+                        radius=int(s * 0.24), outline=(0, 0, 0, 90), width=5)   # shadow
+    d.rounded_rectangle([bx, by, bx + s, by + s],
+                        radius=int(s * 0.24), outline=(255, 255, 255, 235), width=5)
     try:
         logo = Image.open(LOGO).convert("RGBA")
         pad = int(s * 0.16)
         logo.thumbnail((s - 2 * pad, s - 2 * pad))
-        img.alpha_composite(logo, (x + (s - logo.width) // 2, y + (s - logo.height) // 2))
+        img.alpha_composite(logo, (bx + (s - logo.width) // 2, by + (s - logo.height) // 2))
     except Exception:
-        d.text((x + s / 2, y + s / 2), "GN", font=font(int(s * 0.42)), fill=(243, 196, 87), anchor="mm")
+        d.text((bx + s / 2, by + s / 2), "GN", font=font(int(s * 0.42)), fill=(243, 196, 87), anchor="mm")
+
+    wx = bx + s + gap                          # wordmark, left-middle anchored beside the badge
+    d.text((wx + 2, cy + 2), text, font=wm, fill=(0, 0, 0, 110), anchor="lm")   # shadow
+    d.text((wx, cy), text, font=wm, fill=(255, 255, 255, 230), anchor="lm")
     img.save(path)
 
 
