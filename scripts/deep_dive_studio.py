@@ -107,25 +107,27 @@ def groq_curate(stories, want=6):
         f"{i}. [{s['bucket']}] {s['title']} - {s.get('source', '')}"
         for i, s in enumerate(stories))
     system = (
-        "You are the commissioning editor for GreaterNews, a GHANA-FIRST channel making 90-second "
-        "REFERENCED explainer videos. The audience is Ghanaian, so rank headlines by how well each makes "
-        "a strong explainer FOR THAT AUDIENCE.\n"
-        "STRONGLY PREFER (score 8-10): a clear Ghana or Africa angle; or a big global story that hits "
-        "Ghanaian life — fuel/energy prices, the cedi and economy, food prices, jobs, health and disease "
-        "outbreaks, security, migration, or major technology that changes daily life.\n"
-        "ALLOW (score 5-7): major world events with clear global stakes even without a direct Ghana link.\n"
-        "REJECT (score 1-3, keep OUT of the picks): bare sports results/scores/transfers, celebrity and "
-        "entertainment gossip, royal/lifestyle fluff, clickbait listicles, minor local crime, and anything "
-        "with no real depth or stakes.\n"
-        "Every pick must have a genuine 'why a Ghanaian should care' — say it in the angle.")
+        "You are the commissioning editor for GreaterNews, a Ghana-first channel making 90-second "
+        "REFERENCED explainer videos. The audience is Ghanaian — and Ghanaians follow BOTH local news "
+        "AND the world's biggest stories. Pick the headlines that make the strongest explainers for them, "
+        "blending the two.\n"
+        "SCORE 8-10 (top picks) — EITHER (a) a clear Ghana or Africa angle, OR (b) a genuinely MAJOR world "
+        "story people everywhere are following: big wars and geopolitics, the global economy and markets, "
+        "fuel and oil, pandemics and health emergencies, major elections, huge disasters, or world-changing "
+        "technology. A world-shaking story does NOT need a Ghana link to score high.\n"
+        "SCORE 5-7: solid but more niche or slower-moving stories.\n"
+        "SCORE 1-3 (keep OUT of the picks): bare sports results/scores/transfers, celebrity and "
+        "entertainment gossip, royal/lifestyle fluff, clickbait listicles, and minor local crime.\n"
+        "Make sure the final picks BLEND the day's biggest WORLD stories with the strongest Ghana/Africa "
+        "ones — do not let either crowd the other out.")
     user = (
         "Headlines:\n" + listing + "\n\nReturn JSON of the form "
         '{"picks":[{"index":<int from the list>,"score":<1-10>,'
-        '"angle":"why a Ghanaian should care (Ghana/Africa link, or the global stake) in a few words",'
+        '"angle":"the Ghana/Africa link OR the global stake, in a few words",'
         '"why_now":"one short sentence on why it matters now",'
         '"topic":"a specific research query to brief this story"}]} '
-        "with up to " + str(want) + " picks, best first. Include ONLY stories worth a full explainer "
-        "(score 5 or higher) — skip thin sports/celebrity items entirely, even if it means fewer picks.")
+        "with up to " + str(want) + " picks, best first, blending top WORLD stories and Ghana/Africa "
+        "ones. Include only stories worth a full explainer (score 5+); skip thin sports/celebrity items.")
     try:
         r = requests.post(
             "https://api.groq.com/openai/v1/chat/completions",
