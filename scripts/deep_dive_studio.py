@@ -1,0 +1,235 @@
+"""GreaterNews Deep Dive Studio — a LOCAL control panel (runs on your machine).
+
+Start it:
+    python scripts/deep_dive_studio.py
+Then open http://localhost:5200 in your browser. From there you can:
+  - Research a topic  (writes a cited brief + spec via the Claude CLI)  [optional]
+  - Review/edit the brief and the chapters/settings
+  - Build the video   (ElevenLabs/Groq voice, captions, b-roll, ffmpeg)
+  - Preview it inline
+  - Queue + Schedule it to Facebook (2h out, reviewable there first)
+
+It just drives the same scripts (deep_dive_build.py / deep_dive_publish.py / publish.py) — the
+reliable local ffmpeg pipeline — behind a UI. Local only (binds 127.0.0.1).
+"""
+
+import json
+import os
+import re
+import subprocess
+import sys
+import urllib.parse
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DD = os.path.join(ROOT, "content", "deep-dive")
+SPEC = os.path.join(DD, "spec.json")
+PORT = 5200
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
+
+def run(cmd):
+    p = subprocess.run([sys.executable] + cmd, cwd=ROOT, capture_output=True, text=True)
+    return p.returncode, (p.stdout or "") + (p.stderr or "")
+
+
+PAGE = r'''<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1">
+<title>GreaterNews — Deep Dive Studio</title><style>
+:root{--gold:#f3c457;--bg:#0e0e11;--card:#17171c;--line:#2a2a33;--tx:#eee}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.5 'Segoe UI',system-ui,sans-serif}
+header{padding:16px 22px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px}
+header b{color:var(--gold)} .wrap{max-width:900px;margin:0 auto;padding:20px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin:14px 0}
+h3{margin:.2em 0 .6em;font-size:14px;letter-spacing:.04em;text-transform:uppercase;color:var(--gold)}
+label{display:block;font-size:12px;opacity:.7;margin:8px 0 3px}
+input,select,textarea{width:100%;background:#0c0c0f;color:var(--tx);border:1px solid var(--line);border-radius:8px;padding:9px}
+textarea{resize:vertical} .row{display:flex;gap:10px;flex-wrap:wrap}.row>*{flex:1;min-width:120px}
+button{background:var(--gold);color:#111;border:0;border-radius:999px;padding:10px 18px;font-weight:700;cursor:pointer}
+button.ghost{background:transparent;color:var(--tx);border:1px solid var(--line)}
+button:disabled{opacity:.5;cursor:default}
+.ch{border:1px solid var(--line);border-radius:10px;padding:10px;margin:8px 0}.ch .row{align-items:end}
+.small{font-size:12px;opacity:.65}.log{white-space:pre-wrap;font:12px ui-monospace,monospace;background:#0c0c0f;border:1px solid var(--line);border-radius:8px;padding:10px;max-height:220px;overflow:auto}
+video{width:100%;border-radius:10px;margin-top:10px;background:#000}.x{color:#ff6b6b}.ok{color:#7CFC9B}
+details summary{cursor:pointer;color:var(--gold)}
+</style></head><body>
+<header><b>◆ GreaterNews</b> — Deep Dive Studio <span class=small style="margin-left:auto">local · ffmpeg pipeline</span></header>
+<div class=wrap>
+
+<div class=card>
+  <h3>Topic</h3>
+  <div class=row><input id=topic placeholder="e.g. Strait of Hormuz tensions and Ghana fuel prices">
+  <button class=ghost style="flex:0 0 auto" onclick=research()>Research → brief + script</button></div>
+  <p class=small>Researching web-searches the story and writes a cited brief + a draft script (a few minutes). Or just edit the chapters below.</p>
+  <div id=rlog class=log style="display:none"></div>
+</div>
+
+<div class=card>
+  <h3>Brief <span class=small>(review before building)</span></h3>
+  <details><summary>Show brief</summary><div id=brief class=log style="max-height:340px;margin-top:8px">—</div></details>
+</div>
+
+<div class=card>
+  <h3>Settings</h3>
+  <div class=row>
+    <div><label>Voice</label><select id=voice><option value=elevenlabs>ElevenLabs (word-accurate)</option><option value=groq>Groq (free)</option></select></div>
+    <div><label>Groq voice</label><select id=groq_voice><option>hannah</option><option>autumn</option><option>diana</option><option>austin</option><option>daniel</option><option>troy</option></select></div>
+    <div><label>Captions</label><select id=captions><option value=highlight>Highlight box</option><option value=word>Word-by-word</option></select></div>
+    <div><label>Music</label><select id=music><option value=generated>Generated pad</option><option value="">None</option></select></div>
+  </div>
+  <label>Post caption (Facebook)</label><textarea id=caption rows=3></textarea>
+  <label>Sources (comma separated)</label><input id=sources placeholder="EIA, CNN, MyJoyOnline">
+</div>
+
+<div class=card>
+  <h3>Chapters</h3><div id=chapters></div>
+  <button class=ghost onclick=addCh()>+ Add chapter</button>
+</div>
+
+<div class=card>
+  <div class=row><button onclick=save()>Save</button>
+  <button onclick=build()>Build video</button>
+  <button class=ghost onclick=schedule()>Queue + Schedule to Facebook</button></div>
+  <div id=log class=log style="display:none;margin-top:12px"></div>
+  <video id=vid controls style="display:none"></video>
+</div>
+</div>
+<script>
+const $=id=>document.getElementById(id); let spec={};
+function chRow(c={visual:{type:'broll',query:''},say:''}){const d=document.createElement('div');d.className='ch';
+ d.innerHTML=`<div class=row><div style="flex:0 0 120px"><label>Type</label><select class=ctype><option value=broll>b-roll</option><option value=still>still</option></select></div>
+ <div><label>Image/clip search</label><input class=cq></div>
+ <button class=ghost style="flex:0 0 auto" onclick="this.closest('.ch').remove()">✕</button></div>
+ <label>Narration (spoken)</label><textarea class=csay rows=2></textarea>`;
+ d.querySelector('.ctype').value=c.visual.type;d.querySelector('.cq').value=c.visual.query||'';d.querySelector('.csay').value=c.say||'';
+ return d;}
+function addCh(c){$('chapters').appendChild(chRow(c));}
+function load(s){spec=s;$('voice').value=s.voice||'elevenlabs';$('groq_voice').value=s.groq_voice||'hannah';
+ $('captions').value=s.captions||'highlight';$('music').value=s.music||'';
+ $('caption').value=(s.post&&s.post.caption)||'';$('sources').value=((s.post&&s.post.sources)||[]).join(', ');
+ $('chapters').innerHTML='';(s.chapters||[]).forEach(addCh);}
+function collect(){const chapters=[...document.querySelectorAll('.ch')].map(d=>({
+  visual:{type:d.querySelector('.ctype').value,query:d.querySelector('.cq').value.trim()},
+  say:d.querySelector('.csay').value.trim()})).filter(c=>c.say);
+ return {...spec,voice:$('voice').value,groq_voice:$('groq_voice').value,captions:$('captions').value,
+  music:$('music').value,post:{caption:$('caption').value.trim(),sources:$('sources').value.split(',').map(x=>x.trim()).filter(Boolean)},chapters};}
+async function save(){const r=await fetch('/spec',{method:'POST',body:JSON.stringify(collect())});const j=await r.json();spec=j.spec;flash('Saved.');}
+function flash(m,cls=''){const l=$('log');l.style.display='block';l.innerHTML+=`\n${cls?`<span class=${cls}>`:''}${m}${cls?'</span>':''}`;l.scrollTop=l.scrollHeight;}
+async function build(){await save();flash('Building… (1–2 min, TTS + b-roll + ffmpeg)');const r=await fetch('/build',{method:'POST'});const j=await r.json();
+ flash(j.log.split('\n').slice(-8).join('\n'), j.ok?'ok':'x');
+ if(j.ok){const v=$('vid');v.style.display='block';v.src='/video?'+Date.now();v.load();flash('Done — preview above.','ok');}}
+async function schedule(){if(!confirm('Queue + schedule this to Facebook (2h out, reviewable in FB first)?'))return;
+ await save();flash('Scheduling…');const r=await fetch('/schedule',{method:'POST'});const j=await r.json();flash(j.log.split('\n').slice(-10).join('\n'), j.ok?'ok':'x');}
+async function research(){const t=$('topic').value.trim();if(!t)return;const rl=$('rlog');rl.style.display='block';rl.textContent='Researching "'+t+'"… (a few minutes)';
+ const r=await fetch('/research',{method:'POST',body:JSON.stringify({topic:t})});const j=await r.json();rl.textContent=j.log.split('\n').slice(-12).join('\n');
+ if(j.ok){await refresh();rl.textContent+='\nDone — brief + chapters loaded. Review, then Build.';}}
+async function refresh(){load(await (await fetch('/spec')).json());$('brief').textContent=await (await fetch('/brief')).text();}
+refresh();
+</script></body></html>'''
+
+
+class H(BaseHTTPRequestHandler):
+    def _send(self, code, body, ctype="application/json"):
+        b = body if isinstance(body, bytes) else body.encode("utf-8")
+        self.send_response(code)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(b)))
+        self.end_headers()
+        self.wfile.write(b)
+
+    def do_GET(self):
+        path = urllib.parse.urlparse(self.path).path
+        if path == "/":
+            return self._send(200, PAGE, "text/html; charset=utf-8")
+        if path == "/spec":
+            return self._send(200, open(SPEC, encoding="utf-8").read() if os.path.exists(SPEC) else "{}")
+        if path == "/brief":
+            spec = json.load(open(SPEC, encoding="utf-8")) if os.path.exists(SPEC) else {}
+            md = os.path.join(DD, spec.get("brief") or f"{spec.get('slug','')}.md")
+            if not os.path.exists(md):  # fall back to any brief in the folder
+                mds = [f for f in os.listdir(DD) if f.endswith(".md")]
+                md = os.path.join(DD, mds[0]) if mds else md
+            return self._send(200, open(md, encoding="utf-8").read() if os.path.exists(md) else "(no brief yet — Research a topic)", "text/plain; charset=utf-8")
+        if path == "/video":
+            return self._serve_video()
+        self._send(404, "{}")
+
+    def _serve_video(self):
+        spec = json.load(open(SPEC, encoding="utf-8"))
+        vid = os.path.join(DD, f"{spec['slug']}_9x16.mp4")
+        if not os.path.exists(vid):
+            return self._send(404, "no video")
+        size = os.path.getsize(vid)
+        rng = self.headers.get("Range")
+        with open(vid, "rb") as f:
+            if rng and (m := re.match(r"bytes=(\d+)-(\d*)", rng)):
+                start = int(m.group(1))
+                end = int(m.group(2)) if m.group(2) else size - 1
+                f.seek(start)
+                data = f.read(end - start + 1)
+                self.send_response(206)
+                self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
+                self.send_header("Accept-Ranges", "bytes")
+                self.send_header("Content-Type", "video/mp4")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+            else:
+                self.send_response(200)
+                self.send_header("Content-Type", "video/mp4")
+                self.send_header("Content-Length", str(size))
+                self.end_headers()
+                self.wfile.write(f.read())
+
+    def do_POST(self):
+        path = urllib.parse.urlparse(self.path).path
+        length = int(self.headers.get("Content-Length", "0"))
+        body = self.rfile.read(length).decode("utf-8") if length else "{}"
+        if path == "/spec":
+            spec = json.loads(body)
+            with open(SPEC, "w", encoding="utf-8", newline="\n") as h:
+                json.dump(spec, h, indent=2, ensure_ascii=False)
+            return self._send(200, json.dumps({"ok": True, "spec": spec}))
+        if path == "/build":
+            code, out = run([os.path.join("scripts", "deep_dive_build.py"), SPEC])
+            return self._send(200, json.dumps({"ok": code == 0, "log": out}))
+        if path == "/schedule":
+            slug = json.load(open(SPEC, encoding="utf-8"))["slug"]
+            c1, o1 = run([os.path.join("scripts", "deep_dive_publish.py"), SPEC])
+            c2, o2 = run([os.path.join("scripts", "publish.py"), "--date", f"deepdive_{slug}", "--all", "--schedule", "+2h"])
+            return self._send(200, json.dumps({"ok": c1 == 0 and c2 == 0, "log": o1 + "\n" + o2}))
+        if path == "/research":
+            topic = json.loads(body).get("topic", "").strip()
+            return self._research(topic)
+        self._send(404, "{}")
+
+    def _research(self, topic):
+        slug = re.sub(r"[^a-z0-9]+", "-", topic.lower()).strip("-")[:40] or "deep-dive"
+        prompt = (
+            f"You are the GreaterNews deep-dive researcher. Research this story for a Ghana-first news "
+            f"channel: \"{topic}\". Web-search and verify with 2+ independent current sources. "
+            f"Write TWO files. (1) content/deep-dive/{slug}.md: a cited brief — one-line summary, a Ghana/"
+            f"Africa angle if relevant, timeline, key facts (each with a source), the numbers, what's next, "
+            f"and a numbered References list with URLs. (2) content/deep-dive/spec.json with EXACTLY this shape: "
+            f'{{"slug":"{slug}","captions":"highlight","music":"generated","voice":"groq","groq_voice":"hannah",'
+            f'"post":{{"caption":"a punchy 1-2 sentence Facebook caption","sources":["outlet","outlet"]}},'
+            f'"chapters":[{{"say":"one spoken sentence ~18-26 words, facts only","visual":{{"type":"broll or still",'
+            f'"query":"a concrete Pexels/Google image subject"}}}}]}} — 6 to 7 chapters that arc: hook, what/where, '
+            f"why it matters, why now, the numbers, the local impact, what's next. Facts only from your sources."
+        )
+        try:
+            p = subprocess.run(["claude", "-p", prompt, "--allowedTools", "Read,Write,WebSearch,WebFetch,Glob,Grep"],
+                               cwd=ROOT, capture_output=True, text=True, timeout=900)
+            ok = p.returncode == 0 and os.path.exists(SPEC)
+            return self._send(200, json.dumps({"ok": ok, "log": (p.stdout or "")[-1200:] + (p.stderr or "")[-400:]}))
+        except Exception as e:
+            return self._send(200, json.dumps({"ok": False, "log": f"research failed: {e}"}))
+
+    def log_message(self, *a):
+        pass
+
+
+if __name__ == "__main__":
+    print(f"GreaterNews Deep Dive Studio -> http://localhost:{PORT}")
+    ThreadingHTTPServer(("127.0.0.1", PORT), H).serve_forever()
