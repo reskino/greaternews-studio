@@ -75,25 +75,33 @@ def eleven_timestamps(text, mp3_path):
 
 def groq_tts(text, path, voice_name=None):
     c = SECRETS["groq"]
-    for attempt in range(6):
-        r = requests.post(
-            "https://api.groq.com/openai/v1/audio/speech",
-            headers={"Authorization": f"Bearer {c['api_key']}", "Content-Type": "application/json"},
-            json={"model": c.get("tts_model", "canopylabs/orpheus-v1-english"), "input": text,
-                  "voice": voice_name or c.get("tts_voice", "hannah"), "response_format": "wav"},
-            timeout=120,
-        )
-        if r.status_code == 429 and attempt < 5:
-            wait = float(r.headers.get("retry-after", 0))
-            if wait > 90:  # daily quota, not a short throttle -> give up so caller can fall back
-                raise RuntimeError(f"Groq TTS quota exhausted (resets in ~{int(wait / 60)} min)")
-            wait = wait or (6 * (attempt + 1))
-            print(f"    (Groq rate-limited; waiting {int(wait)}s and retrying)")
-            time.sleep(min(wait, 40))
-            continue
-        r.raise_for_status()
-        open(path, "wb").write(r.content)
-        return
+    keys = [k for k in (c.get("api_keys") or [c.get("api_key")]) if k]
+    voice = voice_name or c.get("tts_voice", "hannah")
+    last_err = None
+    for ki, key in enumerate(keys):
+        for attempt in range(3):
+            r = requests.post(
+                "https://api.groq.com/openai/v1/audio/speech",
+                headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+                json={"model": c.get("tts_model", "canopylabs/orpheus-v1-english"), "input": text,
+                      "voice": voice, "response_format": "wav"},
+                timeout=120,
+            )
+            if r.status_code == 429:
+                wait = float(r.headers.get("retry-after", 0))
+                if wait > 90:  # this key's daily quota is gone -> try the next key
+                    last_err = RuntimeError(f"key {ki + 1} quota exhausted (~{int(wait / 60)}m)")
+                    break
+                wait = wait or (5 * (attempt + 1))
+                print(f"    (Groq key {ki + 1} throttled; waiting {int(wait)}s)")
+                time.sleep(min(wait, 30))
+                continue
+            if r.status_code >= 400:  # bad/terms-required key -> try the next key
+                last_err = RuntimeError(f"key {ki + 1}: {r.status_code} {r.text[:100]}")
+                break
+            open(path, "wb").write(r.content)
+            return
+    raise last_err or RuntimeError("Groq TTS failed on all keys")
 
 
 def windows_tts(text, path):
