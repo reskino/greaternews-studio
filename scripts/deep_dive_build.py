@@ -11,6 +11,7 @@ Output: content/deep-dive/<slug>_9x16.mp4  (human review before publishing).
 """
 
 import base64
+import glob
 import io
 import json
 import os
@@ -387,6 +388,8 @@ def add_music(video_in, out_path, music):
 
 def build(spec):
     slug = spec["slug"]
+    for old in glob.glob(os.path.join(tempfile.gettempdir(), "gn-dd-*")):
+        shutil.rmtree(old, ignore_errors=True)  # clear leftover temp dirs from past builds
     work = tempfile.mkdtemp(prefix="gn-dd-")
     os.makedirs(OUT_DIR, exist_ok=True)
     shutil.copy(POPPINS_BOLD, os.path.join(work, "Poppins-Bold.ttf"))
@@ -461,6 +464,7 @@ def build(spec):
     else:
         concat_reencode(segments, out)
     print(f"Done: {out}  ({duration(out):.1f}s)")
+    shutil.rmtree(work, ignore_errors=True)  # free the temp assets/segments
 
 
 if __name__ == "__main__":

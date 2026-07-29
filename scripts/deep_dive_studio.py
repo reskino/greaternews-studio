@@ -403,13 +403,15 @@ class H(BaseHTTPRequestHandler):
                 cwd=ROOT, capture_output=True, text=True, timeout=900,
                 stdin=subprocess.DEVNULL, creationflags=NO_WINDOW)
             ok = p.returncode == 0 and os.path.exists(SPEC)
-            if ok:  # keep a per-slug copy so a later topic can't wipe this one
+            if ok:  # confirm the spec is really for THIS topic (not a stale leftover), then preserve it
                 try:
-                    slug2 = json.load(open(SPEC, encoding="utf-8")).get("slug", "deep-dive")
-                    os.makedirs(os.path.join(DD, "specs"), exist_ok=True)
-                    shutil.copy(SPEC, os.path.join(DD, "specs", f"{slug2}.json"))
+                    written = json.load(open(SPEC, encoding="utf-8"))
+                    ok = written.get("slug") == slug and bool(written.get("chapters"))
+                    if ok:
+                        os.makedirs(os.path.join(DD, "specs"), exist_ok=True)
+                        shutil.copy(SPEC, os.path.join(DD, "specs", f"{slug}.json"))
                 except Exception:
-                    pass
+                    ok = False
             return self._send(200, json.dumps({"ok": ok, "log": (p.stdout or "")[-1200:] + (p.stderr or "")[-400:]}))
         except Exception as e:
             return self._send(200, json.dumps({"ok": False, "log": f"research failed: {e}"}))
