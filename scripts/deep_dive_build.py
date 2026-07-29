@@ -380,7 +380,13 @@ def build(spec):
     groq_voice = spec.get("groq_voice")
     cache, segments = {}, []
 
-    for i, ch in enumerate(spec["chapters"]):
+    # Guarantee the spoken brand sign-off closes every deep dive
+    chapters = spec["chapters"]
+    sign_off = "Follow GreaterNews, news you can trust."
+    if chapters and "greaternews" not in chapters[-1]["say"].lower():
+        chapters[-1]["say"] = chapters[-1]["say"].rstrip().rstrip(".") + ". " + sign_off
+
+    for i, ch in enumerate(chapters):
         mp3 = os.path.join(work, f"v{i:02d}.mp3")
         words = synthesize(ch["say"], mp3, voice, groq_voice)
         write_ass(words, os.path.join(work, f"cap{i:02d}.ass"), cap_style)
@@ -397,12 +403,19 @@ def build(spec):
         if vis["type"] == "broll" and asset:
             vin = ["-stream_loop", "-1", "-i", asset]
             bg = f"scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},setsar=1"
-        elif asset:  # still with Ken Burns: single frame -> zoompan generates the zoom over N frames
+        elif asset:  # still: ease-out Ken Burns that settles at its peak, alternating zoom in/out
             n_frames = max(1, int(dur * 30))
             vin = ["-i", asset]
+            peak = 1.22
+            t = f"min(1,on/{max(1, n_frames - 1)})"        # 0..1 progress
+            ease = f"(1-pow(1-{t},2))"                      # ease-out: moves fast, then settles (still) at peak
+            if i % 2 == 0:
+                z = f"(1.0+{peak - 1.0:.3f}*{ease})"        # zoom in, then hold
+            else:
+                z = f"({peak:.3f}-{peak - 1.0:.3f}*{ease})"  # zoom out, then hold
             bg = (
                 "scale=2160:3840:force_original_aspect_ratio=increase,crop=2160:3840,"
-                f"zoompan=z='min(zoom+0.0012,1.20)':d={n_frames}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s={W}x{H}:fps=30,setsar=1"
+                f"zoompan=z='{z}':d={n_frames}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s={W}x{H}:fps=30,setsar=1"
             )
         else:
             vin = ["-f", "lavfi", "-i", f"color=c=0x0b0b0d:s={W}x{H}:r=30"]

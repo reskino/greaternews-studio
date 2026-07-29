@@ -391,7 +391,8 @@ class H(BaseHTTPRequestHandler):
             f'"cta":"Follow GreaterNews - news you can trust.","hashtags":["#GreaterNews","#Ghana","#Explainer"]}},'
             f'"chapters":[{{"say":"one spoken sentence ~18-26 words, facts only","visual":{{"type":"broll or still",'
             f'"query":"a concrete Pexels/Google image subject"}}}}]}} — 6 to 7 chapters that arc: hook, what/where, '
-            f"why it matters, why now, the numbers, the local impact, what's next. Facts only from your sources."
+            f"why it matters, why now, the numbers, the local impact, what's next. Facts only from your sources. "
+            f"The final chapter's spoken 'say' MUST end with the exact sign-off: Follow GreaterNews, news you can trust."
         )
         try:
             p = subprocess.run(
