@@ -19,6 +19,7 @@ import re
 import subprocess
 import sys
 import urllib.parse
+from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import requests
@@ -50,6 +51,8 @@ TREND_BUCKETS = [
     ("Business", "global economy and markets news today", None),
     ("Energy", "oil gas and energy prices news today", None),
     ("Tech", "technology and AI news today", None),
+    ("Sports", "major sports news today", None),
+    ("Health", "global health and medical news today", None),
 ]
 
 
@@ -68,14 +71,20 @@ def serper_news(query, gl=None):
 
 
 def trending_stories():
-    """Scan the buckets and return a deduped list of current headlines with links."""
+    """Scan the buckets (in parallel) and return a deduped list of current headlines."""
+    def fetch(bucket):
+        label, query, gl = bucket
+        try:
+            return label, serper_news(query, gl)
+        except Exception:
+            return label, []
+
+    with ThreadPoolExecutor(max_workers=len(TREND_BUCKETS)) as ex:
+        by_label = dict(ex.map(fetch, TREND_BUCKETS))
+
     out, seen = [], set()
     for label, query, gl in TREND_BUCKETS:
-        try:
-            news = serper_news(query, gl)
-        except Exception:
-            news = []
-        for n in news[:6]:
+        for n in (by_label.get(label) or [])[:6]:
             title = (n.get("title") or "").strip()
             key = title.lower()[:60]
             if not title or key in seen:
@@ -85,6 +94,54 @@ def trending_stories():
                         "source": n.get("source", ""), "date": n.get("date", ""),
                         "link": n.get("link", ""), "snippet": n.get("snippet", "")})
     return out
+
+
+def groq_curate(stories, want=6):
+    """Fast editorial triage: rank which headlines make the best 90s explainers + suggest an angle."""
+    g = _secrets().get("groq", {})
+    key = g.get("api_key")
+    if not key or not stories:
+        return []
+    model = g.get("llm_model", "llama-3.3-70b-versatile")
+    listing = "\n".join(
+        f"{i}. [{s['bucket']}] {s['title']} - {s.get('source', '')}"
+        for i, s in enumerate(stories))
+    system = (
+        "You are the commissioning editor for GreaterNews, a Ghana-first channel that makes "
+        "90-second REFERENCED explainer videos on big world and African stories. You judge which "
+        "headlines would make the STRONGEST explainer: real depth and stakes, global significance, "
+        "and ideally a Ghana or Africa angle (strong world stories still count). Avoid thin celebrity/"
+        "gossip items and bare sports scores.")
+    user = (
+        "Headlines:\n" + listing + "\n\nReturn JSON of the form "
+        '{"picks":[{"index":<int from the list>,"score":<1-10>,'
+        '"angle":"the Ghana/Africa or global angle in a few words",'
+        '"why_now":"one short sentence on why it matters now",'
+        '"topic":"a specific research query to brief this story"}]} '
+        "with the " + str(want) + " best, best first.")
+    try:
+        r = requests.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+            json={"model": model, "temperature": 0.3,
+                  "response_format": {"type": "json_object"},
+                  "messages": [{"role": "system", "content": system},
+                               {"role": "user", "content": user}]},
+            timeout=45)
+        r.raise_for_status()
+        data = json.loads(r.json()["choices"][0]["message"]["content"])
+        picks = []
+        for p in data.get("picks", []):
+            i = p.get("index")
+            if isinstance(i, int) and 0 <= i < len(stories):
+                s = dict(stories[i])
+                s.update(score=p.get("score"), angle=p.get("angle", ""),
+                         why_now=p.get("why_now", ""),
+                         topic=p.get("topic") or stories[i]["title"])
+                picks.append(s)
+        return picks
+    except Exception:
+        return []
 
 
 PAGE = r'''<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1">
@@ -117,7 +174,7 @@ details summary{cursor:pointer;color:var(--gold)}
   <div class=row><input id=topic placeholder="e.g. Strait of Hormuz tensions and Ghana fuel prices">
   <button class=ghost style="flex:0 0 auto" onclick=research()>Research → brief + script</button></div>
   <p class=small>Researching web-searches the story and writes a cited brief + a draft script (a few minutes). Or just edit the chapters below.</p>
-  <div class=row style="margin-top:2px"><button class=ghost style="flex:0 0 auto" onclick=hot()>🔥 Find hot stories</button><span class=small style="align-self:center">world · Ghana · Africa · business · energy · tech</span></div>
+  <div class=row style="margin-top:2px"><button class=ghost style="flex:0 0 auto" onclick=hot()>🔥 Find hot stories</button><button class=ghost style="flex:0 0 auto" onclick=surprise()>🎲 Surprise me</button><span class=small style="align-self:center">world · Ghana · Africa · business · energy · tech · sports · health</span></div>
   <div id=hotlist style="display:none;margin-top:8px"></div>
   <div id=rlog class=log style="display:none"></div>
 </div>
@@ -192,14 +249,25 @@ async function schedule(){if(!confirm('Queue + schedule this to Facebook (2h out
 async function research(){const t=$('topic').value.trim();if(!t)return;const rl=$('rlog');rl.style.display='block';rl.textContent='Researching "'+t+'"… (a few minutes)';
  const r=await fetch('/research',{method:'POST',body:JSON.stringify({topic:t})});const j=await r.json();rl.textContent=j.log.split('\n').slice(-12).join('\n');
  if(j.ok){await refresh();rl.textContent+='\nDone — brief + chapters loaded. Review, then Build.';}}
-async function hot(){const el=$('hotlist');el.style.display='block';el.innerHTML='<span class=small>Scanning current headlines…</span>';
- let j;try{j=await (await fetch('/trending')).json();}catch(e){el.innerHTML='<span class=x>Search failed.</span>';return;}
- if(!j.stories||!j.stories.length){el.innerHTML='<span class=x>No results — check the Serper key / connection.'+(j.error?(' ('+j.error+')'):'')+'</span>';return;}
- window._hot=j.stories;
- el.innerHTML=j.stories.map((s,i)=>`<div class=hotitem><div><span class=tag>${s.bucket}</span>${s.title}</div>
-  <div class=small>${s.source||''}${s.date?' · '+s.date:''}${s.link?` · <a href="${s.link}" target=_blank rel=noopener>open</a>`:''}</div>
-  <button class=ghost style="margin-top:6px;padding:5px 12px" onclick="pick(${i})">Use this →</button></div>`).join('');}
+function srcMeta(s){return `<div class=small>${s.source||''}${s.date?' · '+s.date:''}${s.link?` · <a href="${s.link}" target=_blank rel=noopener>open</a>`:''}</div>`;}
+async function hot(){const el=$('hotlist');el.style.display='block';el.innerHTML='<span class=small>Scanning headlines and ranking them for explainers…</span>';
+ let j;try{j=await (await fetch('/curate')).json();}catch(e){el.innerHTML='<span class=x>Search failed.</span>';return;}
+ const all=j.all||[];window._hot=all;window._picks=j.picks||[];
+ if(!all.length){el.innerHTML='<span class=x>No results — check the Serper key / connection.'+(j.error?(' ('+j.error+')'):'')+'</span>';return;}
+ let html='';
+ if(window._picks.length){html+='<h3 style="margin:4px 0">✨ Best for a deep dive</h3>'+window._picks.map((s,i)=>`<div class=hotitem>
+   <div><span class=tag>${s.score!=null?('★ '+s.score):s.bucket}</span>${s.title}</div>
+   ${(s.angle||s.why_now)?`<div class=small style="color:#cdb06a">${s.angle||''}${(s.angle&&s.why_now)?' — ':''}${s.why_now||''}</div>`:''}
+   ${srcMeta(s)}<button class=ghost style="margin-top:6px;padding:5px 12px" onclick="pickTopic(${i})">Use this →</button></div>`).join('');}
+ html+='<h3 style="margin:12px 0 4px">More headlines</h3>'+all.map((s,i)=>`<div class=hotitem><div><span class=tag>${s.bucket}</span>${s.title}</div>
+  ${srcMeta(s)}<button class=ghost style="margin-top:6px;padding:5px 12px" onclick="pick(${i})">Use this →</button></div>`).join('');
+ el.innerHTML=html;}
 function pick(i){$('topic').value=window._hot[i].title;window.scrollTo({top:0,behavior:'smooth'});$('topic').focus();}
+function pickTopic(i){const s=window._picks[i];$('topic').value=s.topic||s.title;window.scrollTo({top:0,behavior:'smooth'});$('topic').focus();}
+async function surprise(){const rl=$('rlog');rl.style.display='block';rl.textContent='🎲 Finding the hottest explainer-worthy story…';
+ let j;try{j=await (await fetch('/curate')).json();}catch(e){rl.textContent='Search failed.';return;}
+ const top=(j.picks&&j.picks[0])||(j.all&&j.all[0]);if(!top){rl.textContent='No stories found — check the Serper key.';return;}
+ $('topic').value=top.topic||top.title;rl.textContent='🎲 Picked: '+top.title+'\nResearching…';await research();}
 async function refresh(){load(await (await fetch('/spec')).json());$('brief').textContent=await (await fetch('/brief')).text();}
 refresh();
 </script></body></html>'''
@@ -234,6 +302,12 @@ class H(BaseHTTPRequestHandler):
                 return self._send(200, json.dumps({"stories": trending_stories()}))
             except Exception as e:
                 return self._send(200, json.dumps({"stories": [], "error": str(e)}))
+        if path == "/curate":
+            try:
+                stories = trending_stories()
+                return self._send(200, json.dumps({"picks": groq_curate(stories), "all": stories}))
+            except Exception as e:
+                return self._send(200, json.dumps({"picks": [], "all": [], "error": str(e)}))
         self._send(404, "{}")
 
     def _serve_video(self):
