@@ -78,8 +78,12 @@ details summary{cursor:pointer;color:var(--gold)}
     <div><label>Captions</label><select id=captions><option value=highlight>Highlight box</option><option value=word>Word-by-word</option></select></div>
     <div><label>Music</label><select id=music><option value=generated>Generated pad</option><option value="">None</option></select></div>
   </div>
-  <label>Post caption (Facebook)</label><textarea id=caption rows=3></textarea>
-  <label>Sources (comma separated)</label><input id=sources placeholder="EIA, CNN, MyJoyOnline">
+  <label>Post caption (Facebook) — the hook</label><textarea id=caption rows=3></textarea>
+  <label>Body — 2-3 lines of key facts</label><textarea id=body rows=3></textarea>
+  <label>Sources — one per line: <span class=small>Name | https://url</span></label><textarea id=sources rows=5 placeholder="U.S. EIA | https://www.eia.gov/...
+CNN | https://www.cnn.com/..."></textarea>
+  <label>Call to action</label><input id=cta placeholder="🔔 Follow GreaterNews — news you can trust.">
+  <label>Hashtags (space separated)</label><input id=hashtags placeholder="#GreaterNews #Ghana #Explainer">
 </div>
 
 <div class=card>
@@ -105,15 +109,22 @@ function chRow(c={visual:{type:'broll',query:''},say:''}){const d=document.creat
  d.querySelector('.ctype').value=c.visual.type;d.querySelector('.cq').value=c.visual.query||'';d.querySelector('.csay').value=c.say||'';
  return d;}
 function addCh(c){$('chapters').appendChild(chRow(c));}
-function load(s){spec=s;$('voice').value=s.voice||'elevenlabs';$('groq_voice').value=s.groq_voice||'hannah';
+function srcToLine(s){return (typeof s==='string')?s:(s.url?`${s.name} | ${s.url}`:(s.name||''));}
+function lineToSrc(l){const i=l.indexOf('|');return i>=0?{name:l.slice(0,i).trim(),url:l.slice(i+1).trim()}:{name:l.trim()};}
+function load(s){spec=s;const p=s.post||{};$('voice').value=s.voice||'elevenlabs';$('groq_voice').value=s.groq_voice||'hannah';
  $('captions').value=s.captions||'highlight';$('music').value=s.music||'';
- $('caption').value=(s.post&&s.post.caption)||'';$('sources').value=((s.post&&s.post.sources)||[]).join(', ');
+ $('caption').value=p.caption||'';$('body').value=p.body||'';
+ $('sources').value=(p.sources||[]).map(srcToLine).join('\n');
+ $('cta').value=p.cta||'';$('hashtags').value=(p.hashtags||[]).join(' ');
  $('chapters').innerHTML='';(s.chapters||[]).forEach(addCh);}
 function collect(){const chapters=[...document.querySelectorAll('.ch')].map(d=>({
   visual:{type:d.querySelector('.ctype').value,query:d.querySelector('.cq').value.trim()},
   say:d.querySelector('.csay').value.trim()})).filter(c=>c.say);
+ const post={caption:$('caption').value.trim(),body:$('body').value.trim(),
+  sources:$('sources').value.split('\n').map(x=>x.trim()).filter(Boolean).map(lineToSrc),
+  cta:$('cta').value.trim(),hashtags:$('hashtags').value.split(/\s+/).map(x=>x.trim()).filter(Boolean)};
  return {...spec,voice:$('voice').value,groq_voice:$('groq_voice').value,captions:$('captions').value,
-  music:$('music').value,post:{caption:$('caption').value.trim(),sources:$('sources').value.split(',').map(x=>x.trim()).filter(Boolean)},chapters};}
+  music:$('music').value,post,chapters};}
 async function save(){const r=await fetch('/spec',{method:'POST',body:JSON.stringify(collect())});const j=await r.json();spec=j.spec;flash('Saved.');}
 function flash(m,cls=''){const l=$('log');l.style.display='block';l.innerHTML+=`\n${cls?`<span class=${cls}>`:''}${m}${cls?'</span>':''}`;l.scrollTop=l.scrollHeight;}
 async function build(){await save();flash('Building… (1–2 min, TTS + b-roll + ffmpeg)');const r=await fetch('/build',{method:'POST'});const j=await r.json();
@@ -213,7 +224,9 @@ class H(BaseHTTPRequestHandler):
             f"Africa angle if relevant, timeline, key facts (each with a source), the numbers, what's next, "
             f"and a numbered References list with URLs. (2) content/deep-dive/spec.json with EXACTLY this shape: "
             f'{{"slug":"{slug}","captions":"highlight","music":"generated","voice":"groq","groq_voice":"hannah",'
-            f'"post":{{"caption":"a punchy 1-2 sentence Facebook caption","sources":["outlet","outlet"]}},'
+            f'"post":{{"caption":"a punchy 1-2 sentence hook","body":"2-3 lines of the key facts",'
+            f'"sources":[{{"name":"Outlet (what it backs)","url":"https://real-url-from-your-research"}}],'
+            f'"cta":"Follow GreaterNews - news you can trust.","hashtags":["#GreaterNews","#Ghana","#Explainer"]}},'
             f'"chapters":[{{"say":"one spoken sentence ~18-26 words, facts only","visual":{{"type":"broll or still",'
             f'"query":"a concrete Pexels/Google image subject"}}}}]}} — 6 to 7 chapters that arc: hook, what/where, '
             f"why it matters, why now, the numbers, the local impact, what's next. Facts only from your sources."

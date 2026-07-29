@@ -23,6 +23,36 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 
+def _source_line(s):
+    """A source is either 'Name' or {'name':..., 'url':...}."""
+    if isinstance(s, dict):
+        name = (s.get("name") or "").strip()
+        url = (s.get("url") or "").strip()
+        if name and url:
+            return f"• {name} — {url}"
+        return f"• {name or url}" if (name or url) else ""
+    return f"• {s}".strip()
+
+
+def build_post_text(post):
+    """Assemble the Facebook caption: hook -> body -> clickable sources -> CTA -> hashtags."""
+    caption = (post.get("caption") or "").strip()
+    body = (post.get("body") or "").strip()
+    sources = post.get("sources") or []
+    cta = (post.get("cta") or "").strip()
+    hashtags = post.get("hashtags") or ["#GreaterNews", "#Ghana", "#Explainer"]
+
+    parts = [caption, body]
+    src_lines = [ln for ln in (_source_line(s) for s in sources) if ln]
+    if src_lines:
+        parts.append("🔗 Sources\n" + "\n".join(src_lines))
+    if cta:
+        parts.append(cta)
+    if hashtags:
+        parts.append(" ".join(hashtags))
+    return "\n\n".join(p for p in parts if p)
+
+
 def main(spec_path):
     spec = json.load(open(spec_path, encoding="utf-8"))
     slug = spec["slug"]
@@ -31,14 +61,7 @@ def main(spec_path):
         print(f"No rendered video at content/{video_rel} — run deep_dive_build.py first.")
         sys.exit(1)
 
-    post = spec.get("post", {})
-    caption = (post.get("caption") or "").strip()
-    sources = post.get("sources") or []
-    parts = [caption]
-    if sources:
-        parts.append("Sources: " + " · ".join(sources))
-    parts.append("#GreaterNews #Ghana #Explainer")
-    text = "\n\n".join(p for p in parts if p)
+    text = build_post_text(spec.get("post", {}))
 
     queue = {"date": f"deepdive_{slug}", "items": [
         {"platform": "facebook", "status": "pending", "video": video_rel, "text": text}
