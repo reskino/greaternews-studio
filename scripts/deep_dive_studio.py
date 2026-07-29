@@ -21,6 +21,8 @@ import sys
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+import requests
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DD = os.path.join(ROOT, "content", "deep-dive")
 SPEC = os.path.join(DD, "spec.json")
@@ -33,6 +35,56 @@ if hasattr(sys.stdout, "reconfigure"):
 def run(cmd):
     p = subprocess.run([sys.executable] + cmd, cwd=ROOT, capture_output=True, text=True)
     return p.returncode, (p.stdout or "") + (p.stderr or "")
+
+
+def _secrets():
+    p = os.path.join(ROOT, "secrets.json")
+    return json.load(open(p, encoding="utf-8")) if os.path.exists(p) else {}
+
+
+# Buckets we scan for hot stories: (label, query, country-bias)
+TREND_BUCKETS = [
+    ("World", "breaking world news today", None),
+    ("Ghana", "Ghana breaking news today", "gh"),
+    ("Africa", "Africa top news today", None),
+    ("Business", "global economy and markets news today", None),
+    ("Energy", "oil gas and energy prices news today", None),
+    ("Tech", "technology and AI news today", None),
+]
+
+
+def serper_news(query, gl=None):
+    key = _secrets().get("serper", {}).get("api_key")
+    if not key:
+        return []
+    body = {"q": query, "num": 10}
+    if gl:
+        body["gl"] = gl
+    r = requests.post("https://google.serper.dev/news",
+                      headers={"X-API-KEY": key, "Content-Type": "application/json"},
+                      json=body, timeout=20)
+    r.raise_for_status()
+    return r.json().get("news", [])
+
+
+def trending_stories():
+    """Scan the buckets and return a deduped list of current headlines with links."""
+    out, seen = [], set()
+    for label, query, gl in TREND_BUCKETS:
+        try:
+            news = serper_news(query, gl)
+        except Exception:
+            news = []
+        for n in news[:6]:
+            title = (n.get("title") or "").strip()
+            key = title.lower()[:60]
+            if not title or key in seen:
+                continue
+            seen.add(key)
+            out.append({"bucket": label, "title": title,
+                        "source": n.get("source", ""), "date": n.get("date", ""),
+                        "link": n.get("link", ""), "snippet": n.get("snippet", "")})
+    return out
 
 
 PAGE = r'''<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1">
@@ -53,6 +105,9 @@ button:disabled{opacity:.5;cursor:default}
 .small{font-size:12px;opacity:.65}.log{white-space:pre-wrap;font:12px ui-monospace,monospace;background:#0c0c0f;border:1px solid var(--line);border-radius:8px;padding:10px;max-height:220px;overflow:auto}
 video{width:100%;border-radius:10px;margin-top:10px;background:#000}.x{color:#ff6b6b}.ok{color:#7CFC9B}
 details summary{cursor:pointer;color:var(--gold)}
+.hotitem{border:1px solid var(--line);border-radius:10px;padding:10px;margin:8px 0}
+.tag{background:var(--gold);color:#111;border-radius:6px;padding:1px 7px;font-size:11px;font-weight:700;margin-right:8px}
+.hotitem a{color:var(--gold)}
 </style></head><body>
 <header><b>◆ GreaterNews</b> — Deep Dive Studio <span class=small style="margin-left:auto">local · ffmpeg pipeline</span></header>
 <div class=wrap>
@@ -62,6 +117,8 @@ details summary{cursor:pointer;color:var(--gold)}
   <div class=row><input id=topic placeholder="e.g. Strait of Hormuz tensions and Ghana fuel prices">
   <button class=ghost style="flex:0 0 auto" onclick=research()>Research → brief + script</button></div>
   <p class=small>Researching web-searches the story and writes a cited brief + a draft script (a few minutes). Or just edit the chapters below.</p>
+  <div class=row style="margin-top:2px"><button class=ghost style="flex:0 0 auto" onclick=hot()>🔥 Find hot stories</button><span class=small style="align-self:center">world · Ghana · Africa · business · energy · tech</span></div>
+  <div id=hotlist style="display:none;margin-top:8px"></div>
   <div id=rlog class=log style="display:none"></div>
 </div>
 
@@ -135,6 +192,14 @@ async function schedule(){if(!confirm('Queue + schedule this to Facebook (2h out
 async function research(){const t=$('topic').value.trim();if(!t)return;const rl=$('rlog');rl.style.display='block';rl.textContent='Researching "'+t+'"… (a few minutes)';
  const r=await fetch('/research',{method:'POST',body:JSON.stringify({topic:t})});const j=await r.json();rl.textContent=j.log.split('\n').slice(-12).join('\n');
  if(j.ok){await refresh();rl.textContent+='\nDone — brief + chapters loaded. Review, then Build.';}}
+async function hot(){const el=$('hotlist');el.style.display='block';el.innerHTML='<span class=small>Scanning current headlines…</span>';
+ let j;try{j=await (await fetch('/trending')).json();}catch(e){el.innerHTML='<span class=x>Search failed.</span>';return;}
+ if(!j.stories||!j.stories.length){el.innerHTML='<span class=x>No results — check the Serper key / connection.'+(j.error?(' ('+j.error+')'):'')+'</span>';return;}
+ window._hot=j.stories;
+ el.innerHTML=j.stories.map((s,i)=>`<div class=hotitem><div><span class=tag>${s.bucket}</span>${s.title}</div>
+  <div class=small>${s.source||''}${s.date?' · '+s.date:''}${s.link?` · <a href="${s.link}" target=_blank rel=noopener>open</a>`:''}</div>
+  <button class=ghost style="margin-top:6px;padding:5px 12px" onclick="pick(${i})">Use this →</button></div>`).join('');}
+function pick(i){$('topic').value=window._hot[i].title;window.scrollTo({top:0,behavior:'smooth'});$('topic').focus();}
 async function refresh(){load(await (await fetch('/spec')).json());$('brief').textContent=await (await fetch('/brief')).text();}
 refresh();
 </script></body></html>'''
@@ -164,6 +229,11 @@ class H(BaseHTTPRequestHandler):
             return self._send(200, open(md, encoding="utf-8").read() if os.path.exists(md) else "(no brief yet — Research a topic)", "text/plain; charset=utf-8")
         if path == "/video":
             return self._serve_video()
+        if path == "/trending":
+            try:
+                return self._send(200, json.dumps({"stories": trending_stories()}))
+            except Exception as e:
+                return self._send(200, json.dumps({"stories": [], "error": str(e)}))
         self._send(404, "{}")
 
     def _serve_video(self):
