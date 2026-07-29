@@ -19,6 +19,7 @@ import re
 import subprocess
 import sys
 import shutil
+import threading
 import urllib.parse
 from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -35,6 +36,7 @@ if hasattr(sys.stdout, "reconfigure"):
 
 
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)  # don't flash console windows on Windows
+JOB_LOCK = threading.Lock()  # only one heavy job (build/research/schedule) at a time
 
 
 def run(cmd):
@@ -132,7 +134,9 @@ def groq_curate(stories, want=6):
         '"why_now":"one short sentence on why it matters now",'
         '"topic":"a specific research query to brief this story"}]} '
         "with up to " + str(want) + " picks, best first, blending top WORLD stories and Ghana/Africa "
-        "ones. Include only stories worth a full explainer (score 5+); skip thin sports/celebrity items.")
+        "ones. If several headlines cover the SAME underlying story, include only the single strongest "
+        "one (never list the same story twice). Include only stories worth a full explainer (score 5+); "
+        "skip thin sports/celebrity items.")
     try:
         r = requests.post(
             "https://api.groq.com/openai/v1/chat/completions",
@@ -364,17 +368,25 @@ class H(BaseHTTPRequestHandler):
             with open(SPEC, "w", encoding="utf-8", newline="\n") as h:
                 json.dump(spec, h, indent=2, ensure_ascii=False)
             return self._send(200, json.dumps({"ok": True, "spec": spec}))
-        if path == "/build":
-            code, out = run([os.path.join("scripts", "deep_dive_build.py"), SPEC])
-            return self._send(200, json.dumps({"ok": code == 0, "log": out}))
-        if path == "/schedule":
-            slug = json.load(open(SPEC, encoding="utf-8"))["slug"]
-            c1, o1 = run([os.path.join("scripts", "deep_dive_publish.py"), SPEC])
-            c2, o2 = run([os.path.join("scripts", "publish.py"), "--date", f"deepdive_{slug}", "--all", "--schedule", "+2h"])
-            return self._send(200, json.dumps({"ok": c1 == 0 and c2 == 0, "log": o1 + "\n" + o2}))
-        if path == "/research":
-            topic = json.loads(body).get("topic", "").strip()
-            return self._research(topic)
+        if path in ("/build", "/schedule", "/research"):
+            if not JOB_LOCK.acquire(blocking=False):
+                return self._send(200, json.dumps(
+                    {"ok": False, "log": "Another job (build/research/schedule) is already running — "
+                                         "wait for it to finish."}))
+            try:
+                if path == "/build":
+                    code, out = run([os.path.join("scripts", "deep_dive_build.py"), SPEC])
+                    return self._send(200, json.dumps({"ok": code == 0, "log": out}))
+                if path == "/schedule":
+                    slug = json.load(open(SPEC, encoding="utf-8"))["slug"]
+                    c1, o1 = run([os.path.join("scripts", "deep_dive_publish.py"), SPEC])
+                    c2, o2 = run([os.path.join("scripts", "publish.py"), "--date", f"deepdive_{slug}",
+                                  "--all", "--schedule", "+2h"])
+                    return self._send(200, json.dumps({"ok": c1 == 0 and c2 == 0, "log": o1 + "\n" + o2}))
+                topic = json.loads(body).get("topic", "").strip()  # /research
+                return self._research(topic)
+            finally:
+                JOB_LOCK.release()
         self._send(404, "{}")
 
     def _research(self, topic):

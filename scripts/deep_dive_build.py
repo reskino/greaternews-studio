@@ -313,14 +313,23 @@ def pexels_photo(q):
     return [(p["src"].get("large2x") or p["src"].get("original")) for p in r.json().get("photos", []) if p.get("src")]
 
 
+STOCK_BLOCK = (
+    "shutterstock", "gettyimages", "istockphoto", "istock", "alamy", "dreamstime",
+    "depositphotos", "123rf", "stock.adobe", "fotolia", "bigstock", "vecteezy",
+    "agefotostock", "picfair", "canstockphoto", "adobestock", "shutter",
+)
+
+
 def find_still(q, path):
-    # Google Images first (best relevance for specific subjects), then licensed sources.
+    # Google relevance first, then licensed sources; skip watermarked / unlicensed stock previews.
     for src in (serper_images, commons_images, openverse_images, pexels_photo):
         try:
             urls = src(q)
         except Exception:
             urls = []
         for u in urls:
+            if any(b in u.lower() for b in STOCK_BLOCK):
+                continue
             try:
                 if _download_img(u, path):
                     return True
@@ -368,8 +377,9 @@ def add_music(video_in, out_path, music):
     name in public/music/. Bed is low + faded so narration stays clear."""
     dur = duration(video_in)
     if music == "generated":
-        # A-minor sustained pad (110/C/E/A), low-passed to keep it warm and unobtrusive.
-        expr = "0.30*sin(2*PI*110*t)+0.22*sin(2*PI*130.81*t)+0.20*sin(2*PI*164.81*t)+0.16*sin(2*PI*220*t)"
+        # A-minor pad (110/C/E/A) with a slow ~16s swell so it breathes; low-passed + unobtrusive.
+        chord = "0.30*sin(2*PI*110*t)+0.22*sin(2*PI*130.81*t)+0.20*sin(2*PI*164.81*t)+0.16*sin(2*PI*220*t)"
+        expr = f"({chord})*(0.82+0.18*sin(2*PI*0.06*t))"
         bed_in = ["-f", "lavfi", "-i", f"aevalsrc={expr}:s=48000:d={dur:.2f}"]
         pre = "lowpass=f=850,"
     else:
@@ -422,26 +432,29 @@ def build(spec):
 
         if vis["type"] == "broll" and asset:
             vin = ["-stream_loop", "-1", "-i", asset]
-            bg = f"scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},setsar=1"
-        elif asset:  # still: ease-out Ken Burns that settles at its peak, alternating zoom in/out
+            bg_fc = f"[0:v]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},setsar=1[bg]"
+        elif asset:  # still: fit the WHOLE image over a blurred fill, with ease-out Ken Burns
             n_frames = max(1, int(dur * 30))
             vin = ["-i", asset]
             peak = 1.22
-            t = f"min(1,on/{max(1, n_frames - 1)})"        # 0..1 progress
-            ease = f"(1-pow(1-{t},2))"                      # ease-out: moves fast, then settles (still) at peak
-            if i % 2 == 0:
-                z = f"(1.0+{peak - 1.0:.3f}*{ease})"        # zoom in, then hold
-            else:
-                z = f"({peak:.3f}-{peak - 1.0:.3f}*{ease})"  # zoom out, then hold
-            bg = (
-                "scale=2160:3840:force_original_aspect_ratio=increase,crop=2160:3840,"
-                f"zoompan=z='{z}':d={n_frames}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s={W}x{H}:fps=30,setsar=1"
+            t = f"min(1,on/{max(1, n_frames - 1)})"          # 0..1 progress
+            ease = f"(1-pow(1-{t},2))"                        # ease-out: moves fast, then settles at peak
+            z = (f"(1.0+{peak - 1.0:.3f}*{ease})" if i % 2 == 0
+                 else f"({peak:.3f}-{peak - 1.0:.3f}*{ease})")  # alternate zoom in / out, then hold
+            kb = (f"zoompan=z='{z}':d={n_frames}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
+                  f":s={W}x{H}:fps=30")
+            bg_fc = (                                          # blurred cover behind the fully-fit image
+                "[0:v]split=2[kbb][kbf];"
+                "[kbb]scale=2160:3840:force_original_aspect_ratio=increase,crop=2160:3840,"
+                "boxblur=30:2,eq=brightness=-0.10[kbg];"
+                "[kbf]scale=2160:3840:force_original_aspect_ratio=decrease[kfg];"
+                f"[kbg][kfg]overlay=(W-w)/2:(H-h)/2,{kb},setsar=1[bg]"
             )
         else:
             vin = ["-f", "lavfi", "-i", f"color=c=0x0b0b0d:s={W}x{H}:r=30"]
-            bg = f"scale={W}:{H},setsar=1"
+            bg_fc = f"[0:v]scale={W}:{H},setsar=1[bg]"
         fc = (
-            f"[0:v]{bg}[bg];"
+            f"{bg_fc};"
             f"[bg][1:v]overlay=0:0[hb];"
             f"[hb]subtitles=cap{i:02d}.ass:fontsdir=.[v];"
             f"[2:a]apad[aud]"  # pad voice with silence to the full clip length (a == v)
