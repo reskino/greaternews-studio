@@ -11,6 +11,7 @@ export type ImageResult = {
 
 type CommonsPage = {
   pageid: number;
+  index?: number;
   title?: string;
   imageinfo?: Array<{
     thumburl?: string;
@@ -249,7 +250,40 @@ export function extractEntities(headline: string): string[] {
 type WikiSearchPage = {
   title?: string;
   pageimage?: string;
+  index?: number; // search rank (1 = best match); the API returns pages keyed by id, NOT in rank order
 };
+
+// The API returns `query.pages` as an object keyed by page id, and JS iterates integer keys in
+// ascending numeric order — so without this sort, results come back oldest-page-first, not
+// best-match-first. (That ordering once put Yul Edochie's photo on a Pete Edochie obituary.)
+function byRank<T extends { index?: number }>(pages: T[]): T[] {
+  return [...pages].sort((a, b) => (a.index ?? Number.MAX_SAFE_INTEGER) - (b.index ?? Number.MAX_SAFE_INTEGER));
+}
+
+const LOOKALIKE_MARKERS = /\b(look-?alikes?|impersonat\w*|cosplay\w*|wax figure|parody)\b/i;
+
+function normalizeForMatch(text: string) {
+  return text
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim();
+}
+
+// Keyword-search results (Commons / Openverse) for an auto-posted card must actually be OF the
+// query: every significant query word has to appear in the image title (so "Yul Edochie.JPG" or a
+// relative never stands in for "Pete Edochie"), and lookalike/impersonator photos are rejected.
+export function titleMatchesQuery(title: string, query: string): boolean {
+  if (LOOKALIKE_MARKERS.test(title)) {
+    return false;
+  }
+  const haystack = ` ${normalizeForMatch(title)} `;
+  const needles = normalizeForMatch(query)
+    .split(' ')
+    .filter((word) => word.length > 1 && !STOPWORDS.has(word));
+  return needles.length > 0 && needles.every((word) => haystack.includes(word));
+}
 
 type CommonsFilePage = {
   title?: string;
@@ -267,7 +301,10 @@ type CommonsFilePage = {
 
 // Wikipedia's lead image for an entity is usually the canonical photo of that person, place, or organization.
 // Files that only exist on English Wikipedia (fair use) are filtered out by the Commons license lookup.
-export async function searchWikipediaImages(query: string): Promise<ImageResult[]> {
+// Results come back in search-rank order. `topOnly` keeps just the best-matching article: if THAT
+// article has no free image we return nothing rather than a runner-up article's image (which is
+// how a relative, namesake, or an unrelated page's photo ends up on a card).
+export async function searchWikipediaImages(query: string, opts: { topOnly?: boolean } = {}): Promise<ImageResult[]> {
   const searchParams = new URLSearchParams({
     action: 'query',
     generator: 'search',
@@ -285,11 +322,13 @@ export async function searchWikipediaImages(query: string): Promise<ImageResult[
   }
 
   const searchData = (await searchResponse.json()) as { query?: { pages?: Record<string, WikiSearchPage> } };
-  const pages = Object.values(searchData.query?.pages ?? {}).filter((page) => page.pageimage && page.title);
+  const ranked = byRank(Object.values(searchData.query?.pages ?? {}));
+  const pages = (opts.topOnly ? ranked.slice(0, 1) : ranked).filter((page) => page.pageimage && page.title);
   if (pages.length === 0) {
     return [];
   }
 
+  // File title -> article title, in rank order (Map preserves insertion order).
   const entityByFile = new Map(pages.map((page) => [`File:${(page.pageimage ?? '').replace(/_/g, ' ')}`, page.title ?? '']));
   const licenseParams = new URLSearchParams({
     action: 'query',
@@ -306,10 +345,17 @@ export async function searchWikipediaImages(query: string): Promise<ImageResult[
     throw new Error(`HTTP ${licenseResponse.status}`);
   }
 
-  const licenseData = (await licenseResponse.json()) as { query?: { pages?: Record<string, CommonsFilePage> } };
+  const licenseData = (await licenseResponse.json()) as {
+    query?: { pages?: Record<string, CommonsFilePage>; normalized?: Array<{ from: string; to: string }> };
+  };
 
-  return Object.values(licenseData.query?.pages ?? {}).flatMap((page) => {
-    if (page.missing !== undefined) {
+  // Re-impose the search rank: this response is keyed by Commons page id, not in our order.
+  const pageByTitle = new Map(Object.values(licenseData.query?.pages ?? {}).map((page) => [page.title ?? '', page]));
+  const normalizedTitle = new Map((licenseData.query?.normalized ?? []).map((entry) => [entry.from, entry.to]));
+
+  return [...entityByFile.keys()].flatMap((fileTitle) => {
+    const page = pageByTitle.get(normalizedTitle.get(fileTitle) ?? fileTitle);
+    if (!page || page.missing !== undefined) {
       return [];
     }
 
@@ -318,7 +364,7 @@ export async function searchWikipediaImages(query: string): Promise<ImageResult[
       return [];
     }
 
-    const entity = entityByFile.get(page.title ?? '') ?? (page.title ?? '').replace(/^File:/, '');
+    const entity = entityByFile.get(fileTitle) ?? (page.title ?? '').replace(/^File:/, '');
     const parsedLicense = new DOMParser().parseFromString(info.extmetadata?.LicenseShortName?.value ?? '', 'text/html');
     const parsedArtist = new DOMParser().parseFromString(info.extmetadata?.Artist?.value ?? '', 'text/html');
 
@@ -442,7 +488,7 @@ export async function searchCommons(query: string): Promise<ImageResult[]> {
   }
 
   const data = (await response.json()) as { query?: { pages?: Record<string, CommonsPage> } };
-  const pages = Object.values(data.query?.pages ?? {});
+  const pages = byRank(Object.values(data.query?.pages ?? {}));
 
   return pages.flatMap((page) => {
     const info = page.imageinfo?.[0];
@@ -619,8 +665,16 @@ export async function loadImageWithProxyFallback(url: string) {
 // attribution line that must appear on the card.
 // Freely-licensed tier (Wikipedia lead image, Commons, Openverse). Safe to reuse, credit stamped.
 async function bestLicensedPhoto(query: string): Promise<{ image: HTMLImageElement; credit: string } | null> {
-  const settled = await Promise.allSettled([searchWikipediaImages(query), searchCommons(query), searchOpenverse(query)]);
-  const licensed = dedupeResults(settled.flatMap((result) => (result.status === 'fulfilled' ? result.value : [])));
+  // No human reviews these before they're scheduled, so be strict: only the lead image of the
+  // article the query names, then keyword matches that are demonstrably OF the query.
+  const [wiki, commons, openverse] = await Promise.allSettled([
+    searchWikipediaImages(query, { topOnly: true }),
+    searchCommons(query),
+    searchOpenverse(query),
+  ]);
+  const ok = (result: PromiseSettledResult<ImageResult[]>) => (result.status === 'fulfilled' ? result.value : []);
+  const keyword = [...ok(commons), ...ok(openverse)].filter((result) => titleMatchesQuery(result.title, query));
+  const licensed = dedupeResults([...ok(wiki), ...keyword]);
   for (const candidate of licensed.slice(0, 5)) {
     try {
       const image = await loadImageWithProxyFallback(candidate.fullUrl);
@@ -636,7 +690,7 @@ async function bestLicensedPhoto(query: string): Promise<{ image: HTMLImageEleme
 // Broad web tier (Serper / Google Images) — far better relevance, but rights aren't guaranteed.
 async function bestWebPhoto(query: string): Promise<{ image: HTMLImageElement; credit: string } | null> {
   try {
-    const broad = dedupeResults(await searchSerperImages(query));
+    const broad = dedupeResults(await searchSerperImages(query)).filter((result) => !LOOKALIKE_MARKERS.test(result.title));
     for (const candidate of broad.slice(0, 5)) {
       try {
         const image = await loadImageWithProxyFallback(candidate.fullUrl);

@@ -15,11 +15,13 @@ import glob
 import io
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
 import tempfile
 import time
+import unicodedata
 
 import requests
 from PIL import Image, ImageDraw, ImageFont
@@ -30,6 +32,9 @@ OUT_DIR = os.path.join(ROOT, "content", "deep-dive")
 LOGO = os.path.join(ROOT, "public", "logo.png")
 POPPINS_BOLD = "C:/Windows/Fonts/Poppins-Bold.ttf"
 UA = {"User-Agent": "Mozilla/5.0 (GreaterNews DeepDive)"}
+# Wikimedia's API 403s browser-style "Mozilla/5.0 (...)" agents that aren't a real browser, which
+# silently disabled the Commons tier — it needs a plain tool-style agent (policy: meta.wikimedia.org/wiki/User-Agent_policy).
+WIKI_UA = {"User-Agent": "GreaterNews-DeepDive/1.0 (python-requests)"}
 W, H = 1080, 1920
 
 if hasattr(sys.stdout, "reconfigure"):
@@ -280,37 +285,80 @@ def _download_img(url, path):
     return True
 
 
+# Each source returns [(image_url, title_or_alt_text)] in best-match-first order.
 def serper_images(q):
     key = (SECRETS.get("serper") or {}).get("api_key")
     if not key:
         return []
     r = requests.post("https://google.serper.dev/images", headers={"X-API-KEY": key, "Content-Type": "application/json"},
                       json={"q": q, "num": 10, "gl": "gh"}, timeout=30)
-    return [i["imageUrl"] for i in r.json().get("images", []) if i.get("imageUrl")]
+    return [(i["imageUrl"], i.get("title") or "") for i in r.json().get("images", []) if i.get("imageUrl")]
 
 
 def commons_images(q):
-    r = requests.get("https://commons.wikimedia.org/w/api.php", headers=UA, timeout=30, params={
+    r = requests.get("https://commons.wikimedia.org/w/api.php", headers=WIKI_UA, timeout=30, params={
         "action": "query", "format": "json", "generator": "search", "gsrnamespace": 6,
-        "gsrsearch": q, "gsrlimit": 8, "prop": "imageinfo", "iiprop": "url", "iiurlwidth": 1400})
+        "gsrsearch": f"filetype:bitmap {q}", "gsrlimit": 8, "prop": "imageinfo", "iiprop": "url", "iiurlwidth": 1400})
+    pages = (r.json().get("query", {}).get("pages", {}) or {}).values()
     out = []
-    for p in (r.json().get("query", {}).get("pages", {}) or {}).values():
+    # `pages` is keyed by page id, NOT search rank — sort by `index` or the oldest file wins
+    # (that ordering put Yul Edochie's photo on a Pete Edochie card, 2026-11-25).
+    for p in sorted(pages, key=lambda p: p.get("index", 10**6)):
         ii = (p.get("imageinfo") or [{}])[0]
         u = ii.get("thumburl") or ii.get("url")
         if u and not u.lower().endswith(".svg"):
-            out.append(u)
+            out.append((u, p.get("title") or ""))
     return out
 
 
 def openverse_images(q):
     r = requests.get("https://api.openverse.org/v1/images/", headers=UA, timeout=30, params={"q": q, "page_size": 8})
-    return [i["url"] for i in r.json().get("results", []) if i.get("url")]
+    return [(i["url"], i.get("title") or "") for i in r.json().get("results", []) if i.get("url")]
 
 
 def pexels_photo(q):
     r = requests.get("https://api.pexels.com/v1/search", headers={"Authorization": SECRETS["pexels"]["api_key"]},
                      params={"query": q, "per_page": 8, "orientation": "portrait"}, timeout=30)
-    return [(p["src"].get("large2x") or p["src"].get("original")) for p in r.json().get("photos", []) if p.get("src")]
+    return [((p["src"].get("large2x") or p["src"].get("original")), p.get("alt") or "")
+            for p in r.json().get("photos", []) if p.get("src")]
+
+
+LOOKALIKE = re.compile(r"\b(look-?alikes?|impersonat\w*|cosplay\w*|wax figure|parody)\b", re.I)
+_NAME_STOP = {"the", "a", "an", "of", "in", "on", "at", "for", "and", "or", "to", "with", "by", "from", "as"}
+
+
+def _norm(text):
+    text = "".join(c for c in unicodedata.normalize("NFD", text) if not unicodedata.combining(c))
+    return " " + re.sub(r"[^a-z0-9]+", " ", text.lower()).strip() + " "
+
+
+def name_words(q):
+    """The specific people/places a query names = its capitalised words ('Pete', 'Edochie', 'Accra')."""
+    words = []
+    for w in re.findall(r"\b[A-Z][\w'-]*", q):
+        words += [t for t in _norm(w).split() if len(t) > 1 and t not in _NAME_STOP]
+    # Queries tack on "Ghana" to disambiguate ("... in Accra Ghana"); when something more specific is
+    # named, an "Accra skyline" photo shouldn't be rejected for not also saying "Ghana".
+    specific = [w for w in words if w not in ("ghana", "ghanaian")]
+    return specific or words
+
+
+def names_match(text, names):
+    """Every named word appears (as a word start, so 'Ghana' matches 'Ghanaian') in the title/alt text."""
+    t = _norm(text)
+    return all(f" {n}" in t for n in names)
+
+
+def still_ok(source, url, title, names):
+    if any(b in url.lower() for b in STOCK_BLOCK):
+        return False
+    if LOOKALIKE.search(title or ""):
+        return False
+    # Google ranks by relevance, so trust its order; the fallbacks (Commons/Openverse/stock) must
+    # visibly be OF the named subject — never a relative, namesake, or a stock stranger.
+    if source is not serper_images and names and not names_match(title or "", names):
+        return False
+    return True
 
 
 STOCK_BLOCK = (
@@ -321,14 +369,16 @@ STOCK_BLOCK = (
 
 
 def find_still(q, path):
-    # Google relevance first, then licensed sources; skip watermarked / unlicensed stock previews.
+    # Google relevance first, then licensed sources; skip watermarked / unlicensed stock previews,
+    # lookalikes, and fallback results that don't name who/what the query asks for.
+    names = name_words(q)
     for src in (serper_images, commons_images, openverse_images, pexels_photo):
         try:
-            urls = src(q)
+            hits = src(q)
         except Exception:
-            urls = []
-        for u in urls:
-            if any(b in u.lower() for b in STOCK_BLOCK):
+            hits = []
+        for u, title in hits:
+            if not still_ok(src, u, title, names):
                 continue
             try:
                 if _download_img(u, path):
