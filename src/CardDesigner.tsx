@@ -613,495 +613,569 @@ export default function CardDesigner({
   }
 
   return (
-    <section className="card designer-card">
-      <div className="section-heading">
-        <div>
-          <p className="eyebrow">Card studio</p>
-          <h2>Branded news card</h2>
-        </div>
-        <span className="pill">{formatSizes[format].width}×{formatSizes[format].height}px</span>
-      </div>
+    <>
+      <section id="step-card" className="gn-card app-section designer-card">
+        <header className="gn-card__head">
+          <div>
+            <span className="gn-eyebrow">Card studio</span>
+            <h2 className="gn-h2">
+              <span className="gn-step">4</span>Branded news card
+            </h2>
+          </div>
+          <span className="gn-chip gn-chip--plain">{formatSizes[format].width}×{formatSizes[format].height}px</span>
+        </header>
 
-      <div className="template-grid">
-        {templateOrder.map((key) => (
-          <button
-            key={key}
-            type="button"
-            className={template === key ? 'mode-button active' : 'mode-button'}
-            onClick={() => setTemplate(key)}
-            title={templateMeta[key].note}
-          >
-            {templateMeta[key].label}
-          </button>
-        ))}
-      </div>
-      <p className="designer-note">{templateMeta[template].note}</p>
-
-      <div className="designer-grid">
-        <div className="designer-controls">
-          <label>
-            <span>Search free-to-use photos (Wikimedia Commons + Openverse)</span>
-            <div className="search-row">
-              <input
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter') {
-                    event.preventDefault();
-                    void runImageSearch();
-                  }
-                }}
-                placeholder="e.g. Ghana High Commission, Accra market, Black Stars"
-              />
-              <button type="button" className="secondary" onClick={() => void runImageSearch()} disabled={searching}>
-                {searching ? 'Searching…' : 'Search'}
+        <div className="designer-templates">
+          <div className="gn-seg app-seg" role="group" aria-label="Card template">
+            {templateOrder.map((key) => (
+              <button
+                key={key}
+                type="button"
+                className={template === key ? 'is-on is-gold' : undefined}
+                aria-pressed={template === key}
+                onClick={() => setTemplate(key)}
+                title={templateMeta[key].note}
+              >
+                {templateMeta[key].label}
               </button>
-            </div>
-          </label>
+            ))}
+          </div>
+          <p className="designer-note">{templateMeta[template].note}</p>
+        </div>
 
-          <button type="button" className="secondary story-finder" onClick={() => void findImagesForStory()} disabled={searching}>
-            {searching ? 'Finding images…' : '✦ Find images for the selected story'}
-          </button>
+        <div className="designer-grid">
+          <div className="designer-controls">
+            <div className="app-group">
+              <h3 className="app-group__title">Photo</h3>
 
-          {storyQueries.length > 0 ? (
-            <div className="query-chips">
-              <span className="designer-note">Steer the search:</span>
-              {storyQueries.map((storyQuery) => (
-                <button
-                  key={storyQuery}
-                  type="button"
-                  className="bucket-chip query-chip"
-                  disabled={searching}
-                  onClick={() => {
-                    setQuery(storyQuery);
-                    void executeSearch([storyQuery]);
-                  }}
-                >
-                  {storyQuery}
-                </button>
-              ))}
-            </div>
-          ) : null}
+              <label className="gn-field">
+                <span className="gn-label">
+                  Search free-to-use photos <span className="gn-hint">(Wikimedia Commons + Openverse)</span>
+                </span>
+                <div className="search-row">
+                  <input
+                    className="gn-input"
+                    value={query}
+                    onChange={(event) => setQuery(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') {
+                        event.preventDefault();
+                        void runImageSearch();
+                      }
+                    }}
+                    placeholder="e.g. Ghana High Commission, Accra market, Black Stars"
+                  />
+                  <button type="button" className="gn-btn" onClick={() => void runImageSearch()} disabled={searching}>
+                    {searching ? 'Searching…' : 'Search'}
+                  </button>
+                </div>
+              </label>
 
-          {plan ? (
-            <p className="designer-note">
-              {plan.source === 'ai' ? '✦ ' : ''}Read “{plan.raw}” as: <strong>{plan.interpretation}</strong>
-              {plan.sensitive ? ' · sensitive story — avoid a person photo' : ''}
-            </p>
-          ) : null}
+              <button type="button" className="gn-btn app-finder" onClick={() => void findImagesForStory()} disabled={searching}>
+                {searching ? 'Finding images…' : '✦ Find images for the selected story'}
+              </button>
 
-          {searchError ? <p className="designer-note danger-note">{searchError}</p> : null}
+              {storyQueries.length > 0 ? (
+                <div className="query-chips">
+                  <span className="designer-note">Steer the search:</span>
+                  {storyQueries.map((storyQuery) => (
+                    <button
+                      key={storyQuery}
+                      type="button"
+                      className="gn-chip gn-chip--plain app-chip-btn"
+                      disabled={searching}
+                      onClick={() => {
+                        setQuery(storyQuery);
+                        void executeSearch([storyQuery]);
+                      }}
+                    >
+                      {storyQuery}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
 
-          {results.length > 0 ? (
-            <>
-              {captionLines().length > 0 ? (
-                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginBottom: 8 }}>
-                  <span style={{ fontSize: 13, opacity: 0.7 }}>Apply pick to:</span>
-                  {(['main', ...captionLines().map((_, i) => i)] as ('main' | number)[]).map((target) => {
-                    const active = searchTarget === target;
-                    const label = target === 'main' ? 'Main photo' : `Clip ${target + 1}${beatImages[target] ? ' ✓' : ''}`;
-                    return (
+              {plan ? (
+                <p className="designer-note">
+                  {plan.source === 'ai' ? '✦ ' : ''}Read “{plan.raw}” as: <strong>{plan.interpretation}</strong>
+                  {plan.sensitive ? ' · sensitive story — avoid a person photo' : ''}
+                </p>
+              ) : null}
+
+              {searchError ? <p className="designer-note danger-note">{searchError}</p> : null}
+
+              {results.length > 0 ? (
+                <>
+                  {captionLines().length > 0 ? (
+                    <div className="query-chips">
+                      <span className="designer-note">Apply pick to:</span>
+                      {(['main', ...captionLines().map((_, i) => i)] as ('main' | number)[]).map((target) => {
+                        const active = searchTarget === target;
+                        const label = target === 'main' ? 'Main photo' : `Clip ${target + 1}${beatImages[target] ? ' ✓' : ''}`;
+                        return (
+                          <button
+                            key={String(target)}
+                            type="button"
+                            className={active ? 'gn-chip gn-chip--plain app-chip-btn is-on' : 'gn-chip gn-chip--plain app-chip-btn'}
+                            aria-pressed={active}
+                            onClick={() => setSearchTarget(target)}
+                          >
+                            {label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : null}
+                  <div className="image-results">
+                    {results.map((result) => (
                       <button
-                        key={String(target)}
+                        key={result.id}
                         type="button"
-                        onClick={() => setSearchTarget(target)}
-                        style={{ padding: '4px 10px', borderRadius: 999, fontSize: 13, cursor: 'pointer', color: 'inherit', border: active ? '1px solid #f3c457' : '1px solid rgba(255,255,255,0.2)', background: active ? 'rgba(243,196,87,0.15)' : 'transparent' }}
+                        className={loadingImageId === result.id ? 'image-result loading' : 'image-result'}
+                        onClick={() => void useSearchResult(result)}
+                        title={`${result.title} — ${result.author} (${result.license})`}
+                      >
+                        <img src={result.thumbUrl} alt={result.title} loading="lazy" />
+                        <span>{loadingImageId === result.id ? 'Loading…' : `${result.license} · ${result.provider}`}</span>
+                      </button>
+                    ))}
+                  </div>
+                  <p className="designer-note">
+                    {typeof searchTarget === 'number'
+                      ? `Click a photo to use it for Clip ${searchTarget + 1}. Confirm the license on the source page before publishing.`
+                      : 'Click a photo to load it as the main photo — the credit line is filled in automatically. Always confirm the license on the source page before publishing.'}
+                  </p>
+                </>
+              ) : null}
+
+              <label className="gn-field">
+                <span className="gn-label">
+                  Or upload your own photo <span className="gn-hint">(use one you have the rights to)</span>
+                </span>
+                <input className="gn-input app-file" type="file" accept="image/*" onChange={(event) => handlePhotoUpload(event.target.files)} />
+              </label>
+              {photoName ? (
+                <p className="designer-note">
+                  Loaded: {photoName}
+                  {photoSourcePage ? (
+                    <>
+                      {' · '}
+                      <a href={photoSourcePage} target="_blank" rel="noreferrer">
+                        View source & license
+                      </a>
+                    </>
+                  ) : null}
+                </p>
+              ) : (
+                <p className="designer-note">No photo yet — a placeholder background is shown.</p>
+              )}
+
+              {suggestedLink ? (
+                <>
+                  <button type="button" className="gn-btn gn-btn--sm gn-btn--ghost app-btn-start" onClick={() => void previewArticleImage()} disabled={refLoading}>
+                    {refLoading ? 'Fetching…' : "👁 Preview the article's own photo (reference only)"}
+                  </button>
+                  {refError ? <p className="designer-note danger-note">{refError}</p> : null}
+                  {refImage ? (
+                    <div className="ref-preview">
+                      <img src={refImage} alt="Article preview — reference only" />
+                      <p className="designer-note danger-note">
+                        Reference only — this is the outlet's copyrighted photo. Do not put it on a card. Use it to decide what to search for above.
+                      </p>
+                    </div>
+                  ) : null}
+                </>
+              ) : null}
+
+              <label className="gn-field">
+                <span className="gn-label">
+                  Photo darkness — {Math.round(dim * 100)}% <span className="gn-hint">(darker suits somber stories)</span>
+                </span>
+                <input
+                  className="app-range"
+                  type="range"
+                  min={0}
+                  max={80}
+                  step={5}
+                  value={Math.round(dim * 100)}
+                  onChange={(event) => setDim(Number(event.target.value) / 100)}
+                />
+              </label>
+            </div>
+
+            <div className="app-group">
+              <div className="app-group__head">
+                <h3 className="app-group__title">Card text</h3>
+                <button type="button" className="gn-btn gn-btn--xs" onClick={useSelectedStory}>
+                  Use selected story
+                </button>
+              </div>
+
+              <label className="gn-field">
+                <span className="gn-label">{headlineLabels[template]}</span>
+                <textarea className="gn-textarea" value={headline} onChange={(event) => setHeadline(event.target.value)} rows={template === 'recap' ? 6 : 3} />
+              </label>
+
+              {template === 'headline' || template === 'update' ? (
+                <>
+                  <label className="gn-field">
+                    <span className="gn-label">
+                      Subline <span className="gn-hint">(optional — one sentence of context under the headline)</span>
+                    </span>
+                    <input className="gn-input" value={subline} onChange={(event) => setSubline(event.target.value)} placeholder="e.g. Colombia 1-0 Ghana in the round of 32 — after a run that included holding England" />
+                  </label>
+                  <label className="gn-field">
+                    <span className="gn-label">
+                      Highlight phrase <span className="gn-hint">(colored words inside the headline — skip for tragedy)</span>
+                    </span>
+                    <input className="gn-input" value={highlight} onChange={(event) => setHighlight(event.target.value)} placeholder="e.g. End American Financial Aid" />
+                  </label>
+                  <label className="gn-field">
+                    <span className="gn-label">
+                      Heading position — {textShift === 0 ? 'auto' : `${textShift > 0 ? 'higher' : 'lower'} ${Math.round(Math.abs(textShift) * 100)}%`}
+                      {textShift !== 0 ? (
+                        <button type="button" className="link-button" onClick={() => setTextShift(0)}>
+                          reset
+                        </button>
+                      ) : null}
+                    </span>
+                    <input
+                      className="app-range"
+                      type="range"
+                      min={-100}
+                      max={100}
+                      step={5}
+                      value={Math.round(textShift * 100)}
+                      onChange={(event) => setTextShift(Number(event.target.value) / 100)}
+                    />
+                  </label>
+                </>
+              ) : null}
+
+              {template === 'quote' ? (
+                <label className="gn-field">
+                  <span className="gn-label">Who said it (name, title)</span>
+                  <input className="gn-input" value={attribution} onChange={(event) => setAttribution(event.target.value)} placeholder="e.g. Ghana High Commissioner to South Africa" />
+                </label>
+              ) : null}
+
+              {template === 'post' ? (
+                <>
+                  <div className="field-grid">
+                    <label className="gn-field">
+                      <span className="gn-label">Name (as shown on the post)</span>
+                      <input className="gn-input" value={attribution} onChange={(event) => setAttribution(event.target.value)} placeholder="e.g. Ministry of Information" />
+                    </label>
+                    <label className="gn-field">
+                      <span className="gn-label">Handle / page name</span>
+                      <input className="gn-input" value={postHandle} onChange={(event) => setPostHandle(event.target.value)} placeholder="e.g. @moinfoghana" />
+                    </label>
+                  </div>
+                  <label className="gn-field">
+                    <span className="gn-label">Meta line (time · date · platform)</span>
+                    <input className="gn-input" value={postMeta} onChange={(event) => setPostMeta(event.target.value)} placeholder="e.g. 6:41 PM · 5 Jul 2026 · X" />
+                  </label>
+                  <p className="designer-note">
+                    This renders our own styled graphic of the statement — always quote their exact words and keep the source line filled in.
+                  </p>
+                </>
+              ) : null}
+
+              {template === 'update' ? (
+                <label className="gn-field">
+                  <span className="gn-label">Banner</span>
+                  <div className="chip-row">
+                    {chipOrder.map((label) => (
+                      <button
+                        key={label}
+                        type="button"
+                        className={chip === label ? `chip-button active chip-${label.toLowerCase()}` : 'chip-button'}
+                        onClick={() => setChip(label)}
                       >
                         {label}
                       </button>
-                    );
-                  })}
-                </div>
+                    ))}
+                  </div>
+                </label>
               ) : null}
-              <div className="image-results">
-                {results.map((result) => (
-                  <button
-                    key={result.id}
-                    type="button"
-                    className={loadingImageId === result.id ? 'image-result loading' : 'image-result'}
-                    onClick={() => void useSearchResult(result)}
-                    title={`${result.title} — ${result.author} (${result.license})`}
-                  >
-                    <img src={result.thumbUrl} alt={result.title} loading="lazy" />
-                    <span>{loadingImageId === result.id ? 'Loading…' : `${result.license} · ${result.provider}`}</span>
-                  </button>
-                ))}
-              </div>
-              <p className="designer-note">
-                {typeof searchTarget === 'number'
-                  ? `Click a photo to use it for Clip ${searchTarget + 1}. Confirm the license on the source page before publishing.`
-                  : 'Click a photo to load it as the main photo — the credit line is filled in automatically. Always confirm the license on the source page before publishing.'}
-              </p>
-            </>
-          ) : null}
 
-          <label>
-            <span>Or upload your own photo (use one you have the rights to)</span>
-            <input type="file" accept="image/*" onChange={(event) => handlePhotoUpload(event.target.files)} />
-          </label>
-          {photoName ? (
-            <p className="designer-note">
-              Loaded: {photoName}
-              {photoSourcePage ? (
+              {template === 'stat' ? (
+                <label className="gn-field">
+                  <span className="gn-label">The number (e.g. GH₵ 12.4bn, 23, 87%)</span>
+                  <input className="gn-input" value={statValue} onChange={(event) => setStatValue(event.target.value)} placeholder="e.g. 23" />
+                </label>
+              ) : null}
+
+              {template === 'recap' ? (
                 <>
-                  {' · '}
-                  <a href={photoSourcePage} target="_blank" rel="noreferrer">
-                    View source & license
-                  </a>
+                  <button
+                    type="button"
+                    className="gn-btn app-finder"
+                    onClick={() => {
+                      setHeadline(weeklyHeadlines.join('\n'));
+                      setAttribution(weeklyRange);
+                    }}
+                    disabled={weeklyHeadlines.length === 0}
+                  >
+                    {weeklyHeadlines.length > 0
+                      ? `✦ Fill from this week's log (${weeklyHeadlines.length} stories)`
+                      : 'No logged stories this week yet'}
+                  </button>
+                  <label className="gn-field">
+                    <span className="gn-label">Subtitle (e.g. the date range)</span>
+                    <input className="gn-input" value={attribution} onChange={(event) => setAttribution(event.target.value)} placeholder="e.g. June 29 – July 4, 2026" />
+                  </label>
                 </>
               ) : null}
-            </p>
-          ) : (
-            <p className="designer-note">No photo yet — a placeholder background is shown.</p>
-          )}
+            </div>
 
-          {suggestedLink ? (
-            <>
-              <button type="button" className="secondary" onClick={() => void previewArticleImage()} disabled={refLoading}>
-                {refLoading ? 'Fetching…' : "👁 Preview the article's own photo (reference only)"}
-              </button>
-              {refError ? <p className="designer-note danger-note">{refError}</p> : null}
-              {refImage ? (
-                <div className="ref-preview">
-                  <img src={refImage} alt="Article preview — reference only" />
-                  <p className="designer-note danger-note">
-                    Reference only — this is the outlet's copyrighted photo. Do not put it on a card. Use it to decide what to search for above.
-                  </p>
-                </div>
-              ) : null}
-            </>
-          ) : null}
-
-          <label>
-            <span>Photo darkness — {Math.round(dim * 100)}% (darker suits somber stories)</span>
-            <input
-              type="range"
-              min={0}
-              max={80}
-              step={5}
-              value={Math.round(dim * 100)}
-              onChange={(event) => setDim(Number(event.target.value) / 100)}
-            />
-          </label>
-
-          <label>
-            <span>{headlineLabels[template]}</span>
-            <textarea value={headline} onChange={(event) => setHeadline(event.target.value)} rows={template === 'recap' ? 6 : 3} />
-          </label>
-
-          {template === 'headline' || template === 'update' ? (
-            <>
-              <label>
-                <span>Subline (optional — one sentence of context under the headline)</span>
-                <input value={subline} onChange={(event) => setSubline(event.target.value)} placeholder="e.g. Colombia 1-0 Ghana in the round of 32 — after a run that included holding England" />
-              </label>
-              <label>
-                <span>Highlight phrase (colored words inside the headline — skip for tragedy)</span>
-                <input value={highlight} onChange={(event) => setHighlight(event.target.value)} placeholder="e.g. End American Financial Aid" />
-              </label>
-              <label>
-                <span>
-                  Heading position — {textShift === 0 ? 'auto' : `${textShift > 0 ? 'higher' : 'lower'} ${Math.round(Math.abs(textShift) * 100)}%`}
-                  {textShift !== 0 ? (
-                    <button type="button" className="link-button" onClick={() => setTextShift(0)}>
-                      reset
-                    </button>
-                  ) : null}
-                </span>
-                <input
-                  type="range"
-                  min={-100}
-                  max={100}
-                  step={5}
-                  value={Math.round(textShift * 100)}
-                  onChange={(event) => setTextShift(Number(event.target.value) / 100)}
-                />
-              </label>
-            </>
-          ) : null}
-
-          {template === 'quote' ? (
-            <label>
-              <span>Who said it (name, title)</span>
-              <input value={attribution} onChange={(event) => setAttribution(event.target.value)} placeholder="e.g. Ghana High Commissioner to South Africa" />
-            </label>
-          ) : null}
-
-          {template === 'post' ? (
-            <>
+            <div className="app-group">
+              <h3 className="app-group__title">Look &amp; format</h3>
               <div className="field-grid">
-                <label>
-                  <span>Name (as shown on the post)</span>
-                  <input value={attribution} onChange={(event) => setAttribution(event.target.value)} placeholder="e.g. Ministry of Information" />
+                <label className="gn-field">
+                  <span className="gn-label">Accent color</span>
+                  <input type="color" value={accent} onChange={(event) => setAccent(event.target.value)} className="gn-input color-input" />
                 </label>
-                <label>
-                  <span>Handle / page name</span>
-                  <input value={postHandle} onChange={(event) => setPostHandle(event.target.value)} placeholder="e.g. @moinfoghana" />
+                <label className="gn-field">
+                  <span className="gn-label">Format</span>
+                  <select className="gn-select" value={format} onChange={(event) => setFormat(event.target.value as CardFormat)}>
+                    {(Object.keys(formatSizes) as CardFormat[]).map((key) => (
+                      <option key={key} value={key}>
+                        {formatSizes[key].label}
+                      </option>
+                    ))}
+                  </select>
                 </label>
               </div>
-              <label>
-                <span>Meta line (time · date · platform)</span>
-                <input value={postMeta} onChange={(event) => setPostMeta(event.target.value)} placeholder="e.g. 6:41 PM · 5 Jul 2026 · X" />
-              </label>
-              <p className="designer-note">
-                This renders our own styled graphic of the statement — always quote their exact words and keep the source line filled in.
-              </p>
-            </>
-          ) : null}
 
-          {template === 'update' ? (
-            <label>
-              <span>Banner</span>
-              <div className="chip-row">
-                {chipOrder.map((label) => (
-                  <button
-                    key={label}
-                    type="button"
-                    className={chip === label ? `chip-button active chip-${label.toLowerCase()}` : 'chip-button'}
-                    onClick={() => setChip(label)}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-            </label>
-          ) : null}
-
-          {template === 'stat' ? (
-            <label>
-              <span>The number (e.g. GH₵ 12.4bn, 23, 87%)</span>
-              <input value={statValue} onChange={(event) => setStatValue(event.target.value)} placeholder="e.g. 23" />
-            </label>
-          ) : null}
-
-          {template === 'recap' ? (
-            <>
-              <button
-                type="button"
-                className="secondary story-finder"
-                onClick={() => {
-                  setHeadline(weeklyHeadlines.join('\n'));
-                  setAttribution(weeklyRange);
-                }}
-                disabled={weeklyHeadlines.length === 0}
-              >
-                {weeklyHeadlines.length > 0
-                  ? `✦ Fill from this week's log (${weeklyHeadlines.length} stories)`
-                  : 'No logged stories this week yet'}
-              </button>
-              <label>
-                <span>Subtitle (e.g. the date range)</span>
-                <input value={attribution} onChange={(event) => setAttribution(event.target.value)} placeholder="e.g. June 29 – July 4, 2026" />
-              </label>
-            </>
-          ) : null}
-
-          <div className="field-grid">
-            <label>
-              <span>Accent color</span>
-              <input type="color" value={accent} onChange={(event) => setAccent(event.target.value)} className="color-input" />
-            </label>
-            <label>
-              <span>Format</span>
-              <select value={format} onChange={(event) => setFormat(event.target.value as CardFormat)}>
-                {(Object.keys(formatSizes) as CardFormat[]).map((key) => (
-                  <option key={key} value={key}>
-                    {formatSizes[key].label}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-
-          <div className="field-grid">
-            <label>
-              <span>Handle strip</span>
-              <input value={handle} onChange={(event) => setHandle(event.target.value)} />
-            </label>
-            <label>
-              <span>Credit / footer line</span>
-              <input value={footer} onChange={(event) => setFooter(event.target.value)} placeholder="Photo: Author · License · Source" />
-            </label>
-          </div>
-
-          <label>
-            <span>
-              Story details for the script (optional — paste the article or key facts so the voice can tell the full story)
-              <button type="button" className="link-button" onClick={() => void draftBeatsFromCard()} disabled={draftingBeats || (!headline.trim() && !subline.trim() && !storyDetails.trim())}>
-                {draftingBeats ? 'drafting…' : 'draft from card'}
-              </button>
-            </span>
-            <textarea
-              value={storyDetails}
-              onChange={(event) => setStoryDetails(event.target.value)}
-              rows={4}
-              placeholder={'Paste the verified article text or the key facts here, then click “draft from card”. The more you give, the more the video can actually say.'}
-            />
-          </label>
-          <label>
-            <span>On-screen captions (one short line per slide — optional [SECTION] label)</span>
-            <textarea
-              value={videoBeats}
-              onChange={(event) => setVideoBeats(event.target.value)}
-              rows={5}
-              placeholder={'[THE STORY] Aboagye on EOCO stop list\n[THE DETAIL] Name added without notice\n[WHO] NPP communications director\n[THE SOURCE] MyJoyOnline'}
-            />
-          </label>
-          <label>
-            <span>Voiceover narration (fuller — what the voice says; one line per caption, drafted for you)</span>
-            <textarea
-              value={videoNarration}
-              onChange={(event) => setVideoNarration(event.target.value)}
-              rows={5}
-              placeholder={'Leave blank to speak the captions. Or click “draft from card” to get a fuller, flowing narration here — the slides stay short while the voice tells the whole story.'}
-            />
-          </label>
-          {captionLines().length > 0 ? (
-            <div className="beat-images">
-              <span style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
-                Clip images — auto-fill a quick pick per caption, or edit a query and Find to choose from options
-                <button type="button" className="link-button" onClick={() => void autoFillBeatImages()} disabled={fetchingBeatImages}>
-                  {fetchingBeatImages ? 'finding…' : 'auto-fill images'}
-                </button>
-              </span>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 8 }}>
-                {captionLines().map((caption, index) => (
-                  <div key={index} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <div style={{ width: 44, height: 58, flexShrink: 0, borderRadius: 6, overflow: 'hidden', background: 'rgba(255,255,255,0.08)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                        {beatImages[index] ? (
-                          <img src={beatImages[index]!.src} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                        ) : (
-                          <span style={{ fontSize: 16, opacity: 0.4 }}>▢</span>
-                        )}
-                      </div>
-                      <input
-                        value={videoImageQueries[index] ?? ''}
-                        onChange={(event) => setBeatQuery(index, event.target.value)}
-                        placeholder={caption.replace(/^\[[^\]]*\]\s*/, '') || 'photo subject'}
-                        style={{ flex: 1, minWidth: 0 }}
-                      />
-                      <button type="button" className="secondary" onClick={() => void showBeatOptions(index)}>
-                        {beatOptionsOpen === index ? 'close' : 'find'}
-                      </button>
-                    </div>
-                    {beatOptionsOpen === index ? (
-                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', paddingLeft: 52 }}>
-                        {loadingOptions === index ? (
-                          <span style={{ opacity: 0.6, fontSize: 13 }}>searching…</span>
-                        ) : (beatOptions[index] ?? []).length === 0 ? (
-                          <span style={{ opacity: 0.6, fontSize: 13 }}>no images found — try a different query</span>
-                        ) : (
-                          (beatOptions[index] ?? []).map((result) => (
-                            <button
-                              key={result.id}
-                              type="button"
-                              onClick={() => void chooseBeatImage(index, result)}
-                              title={`${result.title} — ${result.provider}`}
-                              style={{ padding: 0, width: 64, height: 80, borderRadius: 6, overflow: 'hidden', cursor: 'pointer', background: 'none', border: beatImages[index]?.src === result.fullUrl ? '2px solid #f3c457' : '1px solid rgba(255,255,255,0.18)' }}
-                            >
-                              <img src={result.thumbUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                            </button>
-                          ))
-                        )}
-                      </div>
-                    ) : null}
-                  </div>
-                ))}
+              <div className="field-grid">
+                <label className="gn-field">
+                  <span className="gn-label">Handle strip</span>
+                  <input className="gn-input" value={handle} onChange={(event) => setHandle(event.target.value)} />
+                </label>
+                <label className="gn-field">
+                  <span className="gn-label">Credit / footer line</span>
+                  <input className="gn-input" value={footer} onChange={(event) => setFooter(event.target.value)} placeholder="Photo: Author · License · Source" />
+                </label>
               </div>
             </div>
+          </div>
+
+          <div className="designer-preview">
+            <div className="designer-preview__frame">
+              <canvas ref={canvasRef} aria-label="News card preview" />
+            </div>
+            <div className="designer-actions">
+              <button type="button" className="gn-btn gn-btn--sm" onClick={copyCardToClipboard}>
+                {copied ? 'Copied ✓' : 'Copy image'}
+              </button>
+              {typeof navigator !== 'undefined' && 'canShare' in navigator ? (
+                <button type="button" className="gn-btn gn-btn--sm" onClick={() => void shareCard()}>
+                  Share card
+                </button>
+              ) : null}
+              <button type="button" className="gn-btn gn-btn--sm" onClick={() => void downloadAllSizes()}>
+                Download all sizes
+              </button>
+              <button type="button" className="gn-btn gn-btn--primary gn-btn--block" onClick={() => void downloadCard()}>
+                Download PNG
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="step-video" className="gn-card app-section">
+        <header className="gn-card__head">
+          <div>
+            <span className="gn-eyebrow">Video &amp; voice</span>
+            <h2 className="gn-h2">
+              <span className="gn-step">5</span>Turn the card into a video
+            </h2>
+          </div>
+          {videoExportSupported() ? (
+            <div className="gn-actions">
+              <button type="button" className="gn-btn gn-btn--primary" onClick={() => void downloadVideo()} disabled={videoProgress >= 0}>
+                {videoProgress >= 0 ? <span className="gn-spin" aria-hidden="true" /> : null}
+                {videoProgress >= 0 ? `Rendering video… ${Math.round(videoProgress * 100)}%` : '🎬 Export video'}
+              </button>
+            </div>
           ) : null}
-          <div className="field-grid">
-            <label>
-              <span>Video motion style</span>
-              <select value={videoMotion} onChange={(event) => setVideoMotion(event.target.value as VideoMotion)}>
-                <option value="subtle">Subtle — gentle zoom + crossfades</option>
-                <option value="dynamic">Dynamic — bigger zoom + slide transitions</option>
-                <option value="minimal">Minimal — no zoom, hard cuts</option>
-              </select>
-            </label>
-            <label>
-              <span>
-                Video sound
-                <button type="button" className="link-button" onClick={() => (previewingSound ? stopSoundPreview() : void previewSound())} disabled={videoSound === 'none'}>
-                  {previewingSound ? 'stop' : 'preview'}
+        </header>
+        {videoProgress >= 0 ? (
+          <div className="video-progress" role="progressbar" aria-label="Video render progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(videoProgress * 100)}>
+            <span style={{ width: `${Math.round(videoProgress * 100)}%` }} />
+          </div>
+        ) : null}
+
+        <div className="video-grid">
+          <div className="app-group">
+            <h3 className="app-group__title">Script</h3>
+            <label className="gn-field">
+              <span className="gn-label app-label-row">
+                <span>
+                  Story details for the script <span className="gn-hint">(optional — paste the article or key facts so the voice can tell the full story)</span>
+                </span>
+                <button type="button" className="gn-btn gn-btn--xs" onClick={() => void draftBeatsFromCard()} disabled={draftingBeats || (!headline.trim() && !subline.trim() && !storyDetails.trim())}>
+                  {draftingBeats ? 'drafting…' : 'draft from card'}
                 </button>
               </span>
-              <select value={videoSound} onChange={(event) => { stopSoundPreview(); setVideoSound(event.target.value); }}>
-                <optgroup label="Moods">
-                  {(Object.keys(SOUND_LABELS) as VideoSound[]).map((key) => (
-                    <option key={key} value={key}>
-                      {SOUND_LABELS[key]}
-                    </option>
+              <textarea
+                className="gn-textarea"
+                value={storyDetails}
+                onChange={(event) => setStoryDetails(event.target.value)}
+                rows={4}
+                placeholder={'Paste the verified article text or the key facts here, then click “draft from card”. The more you give, the more the video can actually say.'}
+              />
+            </label>
+            <label className="gn-field">
+              <span className="gn-label">
+                On-screen captions <span className="gn-hint">(one short line per slide — optional [SECTION] label)</span>
+              </span>
+              <textarea
+                className="gn-textarea"
+                value={videoBeats}
+                onChange={(event) => setVideoBeats(event.target.value)}
+                rows={5}
+                placeholder={'[THE STORY] Aboagye on EOCO stop list\n[THE DETAIL] Name added without notice\n[WHO] NPP communications director\n[THE SOURCE] MyJoyOnline'}
+              />
+            </label>
+            <label className="gn-field">
+              <span className="gn-label">
+                Voiceover narration <span className="gn-hint">(fuller — what the voice says; one line per caption, drafted for you)</span>
+              </span>
+              <textarea
+                className="gn-textarea"
+                value={videoNarration}
+                onChange={(event) => setVideoNarration(event.target.value)}
+                rows={5}
+                placeholder={'Leave blank to speak the captions. Or click “draft from card” to get a fuller, flowing narration here — the slides stay short while the voice tells the whole story.'}
+              />
+            </label>
+          </div>
+
+          <div className="app-group">
+            <h3 className="app-group__title">Pictures &amp; sound</h3>
+            {captionLines().length > 0 ? (
+              <div className="beat-images">
+                <div className="beat-images__head">
+                  <span className="gn-label">
+                    Clip images <span className="gn-hint">— auto-fill a quick pick per caption, or edit a query and Find to choose from options</span>
+                  </span>
+                  <button type="button" className="gn-btn gn-btn--xs" onClick={() => void autoFillBeatImages()} disabled={fetchingBeatImages}>
+                    {fetchingBeatImages ? 'finding…' : 'auto-fill images'}
+                  </button>
+                </div>
+                <div className="beat-list">
+                  {captionLines().map((caption, index) => (
+                    <div key={index} className="beat">
+                      <div className="beat-row">
+                        <div className="beat-thumb">
+                          {beatImages[index] ? <img src={beatImages[index]!.src} alt="" /> : <span aria-hidden="true">▢</span>}
+                          <span className="beat-thumb__n">{index + 1}</span>
+                        </div>
+                        <input
+                          className="gn-input"
+                          value={videoImageQueries[index] ?? ''}
+                          onChange={(event) => setBeatQuery(index, event.target.value)}
+                          placeholder={caption.replace(/^\[[^\]]*\]\s*/, '') || 'photo subject'}
+                        />
+                        <button type="button" className="gn-btn gn-btn--sm" onClick={() => void showBeatOptions(index)}>
+                          {beatOptionsOpen === index ? 'close' : 'find'}
+                        </button>
+                      </div>
+                      {beatOptionsOpen === index ? (
+                        <div className="beat-options">
+                          {loadingOptions === index ? (
+                            <span className="designer-note">searching…</span>
+                          ) : (beatOptions[index] ?? []).length === 0 ? (
+                            <span className="designer-note">no images found — try a different query</span>
+                          ) : (
+                            (beatOptions[index] ?? []).map((result) => (
+                              <button
+                                key={result.id}
+                                type="button"
+                                className={beatImages[index]?.src === result.fullUrl ? 'beat-option is-on' : 'beat-option'}
+                                onClick={() => void chooseBeatImage(index, result)}
+                                title={`${result.title} — ${result.provider}`}
+                              >
+                                <img src={result.thumbUrl} alt="" />
+                              </button>
+                            ))
+                          )}
+                        </div>
+                      ) : null}
+                    </div>
                   ))}
-                </optgroup>
-                {musicTracks.length > 0 ? (
-                  <optgroup label="My music">
-                    {musicTracks.map((track) => (
-                      <option key={track.id} value={track.id}>
-                        {track.label}
+                </div>
+              </div>
+            ) : (
+              <p className="designer-note">Add on-screen captions to pick a picture for each clip.</p>
+            )}
+
+            <div className="field-grid">
+              <label className="gn-field">
+                <span className="gn-label">Video motion style</span>
+                <select className="gn-select" value={videoMotion} onChange={(event) => setVideoMotion(event.target.value as VideoMotion)}>
+                  <option value="subtle">Subtle — gentle zoom + crossfades</option>
+                  <option value="dynamic">Dynamic — bigger zoom + slide transitions</option>
+                  <option value="minimal">Minimal — no zoom, hard cuts</option>
+                </select>
+              </label>
+              <label className="gn-field">
+                <span className="gn-label app-label-row">
+                  Video sound
+                  <button type="button" className="link-button" onClick={() => (previewingSound ? stopSoundPreview() : void previewSound())} disabled={videoSound === 'none'}>
+                    {previewingSound ? 'stop' : 'preview'}
+                  </button>
+                </span>
+                <select className="gn-select" value={videoSound} onChange={(event) => { stopSoundPreview(); setVideoSound(event.target.value); }}>
+                  <optgroup label="Moods">
+                    {(Object.keys(SOUND_LABELS) as VideoSound[]).map((key) => (
+                      <option key={key} value={key}>
+                        {SOUND_LABELS[key]}
                       </option>
                     ))}
                   </optgroup>
-                ) : null}
-              </select>
-            </label>
-          </div>
-          <div className="field-grid">
-            <label>
-              <span>Voiceover</span>
-              <select value={videoVoice} onChange={(event) => setVideoVoice(event.target.value as VideoVoice)}>
-                <option value="none">None (music only)</option>
-                <option value="groq">Groq (Orpheus) — free, natural</option>
-                <option value="elevenlabs">ElevenLabs — most human (needs plan for commercial)</option>
-                <option value="google">Google voice — needs billing enabled</option>
-              </select>
-            </label>
-            {videoVoice === 'groq' ? (
-              <label>
-                <span>Groq voice</span>
-                <select value={groqVoiceName} onChange={(event) => setGroqVoiceName(event.target.value)}>
-                  <option value="hannah">Hannah (female)</option>
-                  <option value="autumn">Autumn (female)</option>
-                  <option value="diana">Diana (female)</option>
-                  <option value="austin">Austin (male)</option>
-                  <option value="daniel">Daniel (male)</option>
-                  <option value="troy">Troy (male)</option>
+                  {musicTracks.length > 0 ? (
+                    <optgroup label="My music">
+                      {musicTracks.map((track) => (
+                        <option key={track.id} value={track.id}>
+                          {track.label}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ) : null}
                 </select>
               </label>
-            ) : null}
-          </div>
-
-          <div className="designer-actions">
-            <button type="button" className="secondary" onClick={useSelectedStory}>
-              Use selected story
-            </button>
-            <button type="button" className="secondary" onClick={copyCardToClipboard}>
-              {copied ? 'Copied ✓' : 'Copy image'}
-            </button>
-            {typeof navigator !== 'undefined' && 'canShare' in navigator ? (
-              <button type="button" className="secondary" onClick={() => void shareCard()}>
-                Share card
-              </button>
-            ) : null}
-            <button type="button" className="secondary" onClick={() => void downloadAllSizes()}>
-              Download all sizes
-            </button>
-            {videoExportSupported() ? (
-              <button type="button" className="secondary" onClick={() => void downloadVideo()} disabled={videoProgress >= 0}>
-                {videoProgress >= 0 ? `Rendering video… ${Math.round(videoProgress * 100)}%` : '🎬 Export video'}
-              </button>
-            ) : null}
-            <button type="button" className="primary" onClick={() => void downloadCard()}>
-              Download PNG
-            </button>
+            </div>
+            <div className="field-grid">
+              <label className="gn-field">
+                <span className="gn-label">Voiceover</span>
+                <select className="gn-select" value={videoVoice} onChange={(event) => setVideoVoice(event.target.value as VideoVoice)}>
+                  <option value="none">None (music only)</option>
+                  <option value="groq">Groq (Orpheus) — free, natural</option>
+                  <option value="elevenlabs">ElevenLabs — most human (needs plan for commercial)</option>
+                  <option value="google">Google voice — needs billing enabled</option>
+                </select>
+              </label>
+              {videoVoice === 'groq' ? (
+                <label className="gn-field">
+                  <span className="gn-label">Groq voice</span>
+                  <select className="gn-select" value={groqVoiceName} onChange={(event) => setGroqVoiceName(event.target.value)}>
+                    <option value="hannah">Hannah (female)</option>
+                    <option value="autumn">Autumn (female)</option>
+                    <option value="diana">Diana (female)</option>
+                    <option value="austin">Austin (male)</option>
+                    <option value="daniel">Daniel (male)</option>
+                    <option value="troy">Troy (male)</option>
+                  </select>
+                </label>
+              ) : null}
+            </div>
           </div>
         </div>
-
-        <div className="designer-preview">
-          <canvas ref={canvasRef} aria-label="News card preview" />
-        </div>
-      </div>
-    </section>
+      </section>
+    </>
   );
 }
