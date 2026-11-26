@@ -17,3 +17,6 @@ public/music/*.mp3
 public/music/*.m4a
 public/music/*.wav
 public/music/*.ogg
+
+# API key dropped in by hand - the key itself lives in secrets.json
+content/greaternews_api.txt

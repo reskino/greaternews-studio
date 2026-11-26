@@ -1,0 +1,502 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Deep Dive Studio · GreaterNews</title>
+<link rel="icon" href="/logo.png">
+<style>
+/*GN_UI*/
+
+/* ---------- Deep Dive Studio layout (on top of the shared GN UI system) ---------- */
+.dd-layout { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 22px; align-items: start; max-width: 1360px; margin: 0 auto; }
+.dd-col { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; min-width: 0; }
+.dd-side { position: sticky; top: 18px; display: grid; gap: 14px; }
+.dd-section { scroll-margin-top: 18px; }
+.dd-hero { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: center; }
+.dd-topic { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; }
+.dd-topic .gn-input { min-height: 46px; font-size: 15.5px; }
+.dd-topic .gn-btn { min-height: 46px; }
+.dd-progress { display: none; align-items: center; gap: 12px; padding: 12px 14px; border-radius: var(--gn-radius); background: var(--gn-gold-soft); border: 1px solid var(--gn-gold-line); color: var(--gn-gold-strong); font-size: 14px; }
+.dd-progress.is-on { display: flex; }
+.dd-progress .gn-spin { width: 16px; height: 16px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: gn-spin 0.8s linear infinite; flex: 0 0 16px; }
+.dd-hot { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.dd-hot .gn-item { align-content: start; }
+.dd-hot .gn-item__foot { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 4px; }
+.dd-angle { font-size: 13px; color: #d9c48d; }
+.dd-more { display: grid; gap: 6px; }
+.dd-more .gn-item { grid-template-columns: minmax(0, 1fr) auto; align-items: center; padding: 10px 12px; }
+.dd-brief { max-height: 460px; overflow: auto; font-size: 14px; color: var(--gn-text-2); overflow-wrap: anywhere; }
+.dd-brief p { margin: 0 0 8px; }
+.dd-brief .md-h { font: 600 15px/1.3 var(--gn-font-display); color: var(--gn-text); margin: 14px 0 6px; }
+.dd-brief .md-li { padding-left: 16px; position: relative; margin: 0 0 4px; }
+.dd-brief .md-li::before { content: '•'; position: absolute; left: 3px; color: var(--gn-gold); }
+.dd-brief .md-ol::before { content: ''; }
+.dd-brief .md-ol { padding-left: 4px; }
+.dd-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.dd-ch { display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 12px; padding: 14px; border-radius: var(--gn-radius); background: var(--gn-surface-2); border: 1px solid var(--gn-line); }
+.dd-ch:hover { border-color: var(--gn-line-strong); }
+.dd-ch__num { width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center; background: var(--gn-surface-3); font: 700 13px/1 var(--gn-font-display); color: var(--gn-text-2); }
+.dd-ch__body { display: grid; gap: 10px; min-width: 0; }
+.dd-ch__top { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.dd-ch__top .gn-input { flex: 1 1 220px; }
+.dd-ch__tools { display: flex; gap: 4px; margin-left: auto; }
+.dd-ch__meta { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--gn-muted); }
+.dd-ch__meta .is-long { color: var(--gn-red); }
+.dd-ch .clipx { display: none; gap: 10px; padding: 10px 12px; border-radius: var(--gn-radius-sm); background: var(--gn-violet-soft); border: 1px solid rgba(179, 148, 255, 0.25); }
+.dd-ch.is-clip .clipx { display: grid; }
+.dd-ch.is-clip .dd-ch__num { background: var(--gn-violet-soft); color: var(--gn-violet); }
+.dd-postpreview { white-space: pre-wrap; font-size: 13.5px; line-height: 1.55; background: #0c0d11; border: 1px solid var(--gn-line); border-radius: var(--gn-radius); padding: 14px; max-height: 420px; overflow: auto; color: var(--gn-text-2); }
+.dd-preview-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 12px; }
+.dd-side .gn-phone { max-width: 270px; }
+.dd-publish { display: grid; gap: 8px; }
+.dd-publish .gn-actions .gn-btn { flex: 1 1 auto; }
+.dd-status { display: grid; gap: 7px; }
+.dd-status .gn-chip { justify-content: flex-start; }
+.dd-legend { display: flex; gap: 8px; flex-wrap: wrap; font-size: 12px; color: var(--gn-muted); }
+@media (max-width: 1180px) {
+  .dd-layout { grid-template-columns: 1fr; }
+  .dd-side { position: static; grid-template-columns: minmax(0, 300px) minmax(0, 1fr); align-items: start; }
+}
+@media (max-width: 760px) {
+  .dd-layout { grid-template-columns: minmax(0, 1fr); }
+  .dd-stats { min-width: 0 !important; width: 100%; }
+  .gn-card { padding: 16px; }
+  .gn-h1 { font-size: 22px; }
+  .dd-hot { grid-template-columns: 1fr; }
+  .dd-side { grid-template-columns: minmax(0, 1fr); }
+  .dd-topic { grid-template-columns: minmax(0, 1fr); }
+  .dd-hero { grid-template-columns: minmax(0, 1fr); }
+}
+</style>
+</head>
+<body class="gn">
+<div class="gn-shell">
+  <aside class="gn-sidebar">
+    <div class="gn-brand">
+      <div class="gn-brand__badge"><img src="/logo.png" alt=""></div>
+      <div><div class="gn-brand__name">GREATERNEWS</div><div class="gn-brand__sub">Deep Dive Studio</div></div>
+    </div>
+    <nav class="gn-nav" id="nav">
+      <div class="gn-nav__label">Workflow</div>
+      <a href="#find"><span class="gn-nav__num">1</span>Find a story</a>
+      <a href="#brief"><span class="gn-nav__num">2</span>Research brief</a>
+      <a href="#look"><span class="gn-nav__num">3</span>Cover &amp; look</a>
+      <a href="#script"><span class="gn-nav__num">4</span>Script</a>
+      <a href="#post"><span class="gn-nav__num">5</span>Facebook post</a>
+      <a href="#publish"><span class="gn-nav__num">6</span>Build &amp; publish</a>
+    </nav>
+    <div class="gn-sidebar__foot">
+      <div class="gn-nav__label">Engines</div>
+      <div class="dd-status" id="status"><span class="gn-chip">Checking…</span></div>
+    </div>
+  </aside>
+
+  <main class="gn-main">
+    <div class="dd-layout">
+      <div class="dd-col">
+
+        <!-- 1. Find a story -->
+        <section class="gn-card gn-card--accent dd-section" id="find">
+          <div class="gn-card__head">
+            <div><span class="gn-eyebrow">Step 1 · Find a story</span><h1 class="gn-h1">What's the deep dive today?</h1>
+              <p class="gn-sub">Type a topic, or let the newsroom scan today's biggest world, Ghana and Africa headlines.</p></div>
+          </div>
+          <div class="dd-topic">
+            <input class="gn-input" id="topic" placeholder="e.g. Strait of Hormuz tensions and Ghana fuel prices" onkeydown="if(event.key==='Enter')research()">
+            <button class="gn-btn gn-btn--primary" id="researchBtn" onclick="research()">Research &rarr; brief + script</button>
+          </div>
+          <div class="gn-row" style="margin-top:12px;justify-content:space-between">
+            <div class="gn-actions">
+              <button class="gn-btn gn-btn--sm" onclick="hot()">🔥 Hot stories</button>
+              <button class="gn-btn gn-btn--sm gn-btn--ghost" onclick="surprise()">🎲 Surprise me</button>
+            </div>
+            <div class="gn-actions"><span class="gn-small gn-muted">Length</span>
+              <div class="gn-seg" id="lengthSeg">
+                <button data-v="auto" class="is-on is-gold">As the story needs</button><button data-v="short">Short · 60–90s</button><button data-v="long">Long · 2–3 min</button>
+              </div>
+            </div>
+          </div>
+          <div class="dd-progress" id="rprog" style="margin-top:14px"><span class="gn-spin"></span><span id="rprogText"></span></div>
+          <div class="gn-log" id="rlog" style="display:none;margin-top:12px"></div>
+          <div id="hotwrap" style="display:none;margin-top:18px">
+            <div class="gn-card__head" style="margin-bottom:10px"><div><span class="gn-eyebrow">Best for a deep dive</span><span class="gn-small gn-muted" id="hotEngine"></span></div></div>
+            <div class="dd-hot" id="hotpicks"></div>
+            <details class="gn-details" style="margin-top:12px"><summary>More headlines <span class="gn-chip gn-chip--plain" id="hotCount"></span></summary>
+              <div class="gn-details__body dd-more" id="hotmore"></div></details>
+          </div>
+        </section>
+
+        <!-- 2. Brief -->
+        <section class="gn-card dd-section" id="brief">
+          <div class="gn-card__head">
+            <div><span class="gn-eyebrow">Step 2 · Research brief</span><h2 class="gn-h2">Check the facts before you build</h2>
+              <p class="gn-sub">The cited brief the script was written from. Every claim should trace to a source.</p></div>
+            <button class="gn-btn gn-btn--sm gn-btn--ghost" onclick="refresh(true)">Reload</button>
+          </div>
+          <details class="gn-details" id="briefBox"><summary id="briefTitle">Show brief</summary><div class="gn-details__body dd-brief" id="briefBody">—</div></details>
+        </section>
+
+        <!-- 3. Cover & look -->
+        <section class="gn-card dd-section" id="look">
+          <div class="gn-card__head">
+            <div><span class="gn-eyebrow">Step 3 · Cover &amp; look</span><h2 class="gn-h2">Opening card, voice and sound</h2>
+              <p class="gn-sub">The cover is the first frame and the Facebook thumbnail, drawn by the same engine as the image posts.</p></div>
+          </div>
+          <div class="gn-grid">
+            <div class="gn-field"><label class="gn-label" for="cv_headline">Cover headline <span class="gn-hint">· 6–9 words</span></label>
+              <input class="gn-input" id="cv_headline" placeholder="How Senegal Won Back The AFCON Title"></div>
+            <div class="gn-grid-2">
+              <div class="gn-field"><label class="gn-label" for="cv_highlight">Gold words <span class="gn-hint">· copied from the headline</span></label><input class="gn-input" id="cv_highlight" placeholder="Won Back"></div>
+              <div class="gn-field"><label class="gn-label" for="cv_query">Cover photo search</label><input class="gn-input" id="cv_query" placeholder="Senegal national football team AFCON trophy"></div>
+            </div>
+            <div class="gn-field"><label class="gn-label" for="cv_subline">Subline <span class="gn-hint">· one short sentence under the headline</span></label><input class="gn-input" id="cv_subline"></div>
+            <hr class="gn-divider">
+            <div class="gn-grid-4">
+              <div class="gn-field"><label class="gn-label" for="voice">Voice</label><select class="gn-select" id="voice"><option value="elevenlabs">ElevenLabs (word-accurate)</option><option value="groq">Groq (free)</option></select></div>
+              <div class="gn-field"><label class="gn-label" for="groq_voice">Groq voice</label><select class="gn-select" id="groq_voice"><option>hannah</option><option>autumn</option><option>diana</option><option>austin</option><option>daniel</option><option>troy</option></select></div>
+              <div class="gn-field"><label class="gn-label" for="captions">Captions</label><select class="gn-select" id="captions"><option value="highlight">Highlight box</option><option value="word">Word-by-word</option></select></div>
+              <div class="gn-field"><label class="gn-label" for="music">Music</label><select class="gn-select" id="music"><option value="generated">Generated pad</option><option value="">None</option></select></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- 4. Script -->
+        <section class="gn-card dd-section" id="script">
+          <div class="gn-card__head">
+            <div><span class="gn-eyebrow">Step 4 · Script</span><h2 class="gn-h2">Chapters</h2>
+              <p class="gn-sub">One spoken sentence each (≤ 26 words), with what's on screen while it's said.</p></div>
+            <div class="dd-stats" style="min-width:300px">
+              <div class="gn-stat"><span class="gn-stat__v" id="stCh">0</span><span class="gn-stat__k">Chapters</span></div>
+              <div class="gn-stat"><span class="gn-stat__v" id="stWords">0</span><span class="gn-stat__k">Words</span></div>
+              <div class="gn-stat"><span class="gn-stat__v" id="stDur">0:00</span><span class="gn-stat__k">≈ Length</span></div>
+            </div>
+          </div>
+          <div class="dd-legend" style="margin-bottom:12px">
+            <span class="gn-chip gn-chip--info">B-roll · stock video</span><span class="gn-chip gn-chip--gold">Photo · named subject</span><span class="gn-chip gn-chip--violet">News clip · real footage when free to reuse</span>
+          </div>
+          <div class="gn-grid" id="chapters"></div>
+          <button class="gn-btn gn-btn--ghost" style="margin-top:12px" onclick="addCh();stats()">+ Add chapter</button>
+        </section>
+
+        <!-- 5. Post -->
+        <section class="gn-card dd-section" id="post">
+          <div class="gn-card__head">
+            <div><span class="gn-eyebrow">Step 5 · Facebook post</span><h2 class="gn-h2">Caption, facts and sources</h2>
+              <p class="gn-sub">Hook → key facts → clickable sources → footage credits → call to action → hashtags.</p></div>
+          </div>
+          <div class="gn-grid-2" style="align-items:start">
+            <div class="gn-grid">
+              <div class="gn-field"><label class="gn-label" for="caption">Hook <span class="gn-hint">· 1–2 punchy sentences</span></label><textarea class="gn-textarea" id="caption" rows="3"></textarea></div>
+              <div class="gn-field"><label class="gn-label" for="body">Key facts <span class="gn-hint">· 2–3 lines</span></label><textarea class="gn-textarea" id="body" rows="4"></textarea></div>
+              <div class="gn-field"><label class="gn-label" for="sources">Sources <span class="gn-hint">· one per line: Name | https://url</span></label><textarea class="gn-textarea gn-mono" id="sources" rows="5" style="font-size:12.5px" placeholder="U.S. EIA | https://www.eia.gov/...&#10;CNN | https://www.cnn.com/..."></textarea></div>
+              <div class="gn-grid-2">
+                <div class="gn-field"><label class="gn-label" for="cta">Call to action</label><input class="gn-input" id="cta" placeholder="🔔 Follow GreaterNews — news you can trust."></div>
+                <div class="gn-field"><label class="gn-label" for="hashtags">Hashtags</label><input class="gn-input" id="hashtags" placeholder="#GreaterNews #Ghana #Explainer"></div>
+              </div>
+            </div>
+            <div class="gn-field"><span class="gn-label">Preview <span class="gn-hint">· as it will read on Facebook</span></span><div class="dd-postpreview" id="postPreview"></div></div>
+          </div>
+        </section>
+      </div>
+
+      <!-- Preview + publish -->
+      <aside class="dd-side" id="publish">
+        <div class="gn-card">
+          <div class="dd-preview-head">
+            <div class="gn-seg" id="pvSeg"><button data-v="video" class="is-on">Video</button><button data-v="cover">Cover</button></div>
+            <button class="gn-btn gn-btn--xs gn-btn--ghost" id="safeBtn" onclick="toggleSafe()" title="Show the areas phones and the Reels UI cover">Safe zones</button>
+          </div>
+          <div class="gn-phone">
+            <div class="gn-phone__screen">
+              <video id="vid" controls playsinline style="display:none"></video>
+              <img id="cov" alt="cover card" style="display:none">
+              <div class="gn-phone__empty" id="pvEmpty">Build the video to preview it here.</div>
+              <div class="gn-safe" id="safe"></div>
+            </div>
+            <div class="gn-phone__notch"></div>
+          </div>
+        </div>
+        <div class="gn-card dd-publish">
+          <span class="gn-eyebrow">Step 6 · Build &amp; publish</span>
+          <div class="gn-actions">
+            <button class="gn-btn gn-btn--sm" onclick="save(true)">Save</button>
+            <button class="gn-btn gn-btn--sm gn-btn--primary" id="buildBtn" onclick="build()">Build video</button>
+          </div>
+          <div class="gn-actions">
+            <button class="gn-btn gn-btn--sm" onclick="schedule()">Schedule (+2h)</button>
+            <button class="gn-btn gn-btn--sm gn-btn--live" onclick="postNow()">Post now</button>
+          </div>
+          <p class="gn-hint" style="margin:2px 0 0">Watch the preview first. Scheduling lands in Facebook's queue so you can still change or delete it.</p>
+          <div class="gn-log" id="log" style="display:none"></div>
+        </div>
+      </aside>
+    </div>
+  </main>
+</div>
+<div class="gn-toasts" id="toasts"></div>
+
+<script>
+const $ = id => document.getElementById(id);
+let spec = {}, briefLoaded = false;
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+/* ---------- small UI helpers ---------- */
+function toast(msg, kind = '') {
+  const t = document.createElement('div'); t.className = 'gn-toast' + (kind ? ' gn-toast--' + kind : ''); t.textContent = msg;
+  $('toasts').appendChild(t); setTimeout(() => t.remove(), 4200);
+}
+function log(m, cls = '') {
+  const l = $('log'); l.style.display = 'block';
+  l.innerHTML += (l.innerHTML ? '\n' : '') + (cls ? `<span class="${cls}">${esc(m)}</span>` : esc(m)); l.scrollTop = l.scrollHeight;
+}
+function seg(id, onChange) {
+  const el = $(id);
+  el.addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return;
+    el.querySelectorAll('button').forEach(x => x.classList.toggle('is-on', x === b)); onChange && onChange(b.dataset.v); });
+  return () => (el.querySelector('.is-on') || {}).dataset?.v;
+}
+const lengthVal = seg('lengthSeg');
+seg('pvSeg', v => showPane(v));
+function busy(btn, on, label) {
+  if (!btn) return; if (on) { btn.dataset.label = btn.innerHTML; btn.setAttribute('aria-busy', 'true'); btn.disabled = true; btn.innerHTML = `<span class="gn-spin"></span>${label || 'Working…'}`; }
+  else { btn.removeAttribute('aria-busy'); btn.disabled = false; if (btn.dataset.label) btn.innerHTML = btn.dataset.label; }
+}
+
+/* ---------- status (sidebar) ---------- */
+async function loadStatus() {
+  try {
+    const s = await (await fetch('/status')).json();
+    const chip = (ok, on, off, warn) => `<span class="gn-chip ${ok ? 'gn-chip--ok' : (warn ? 'gn-chip--warn' : 'gn-chip--err')}">${ok ? on : off}</span>`;
+    $('status').innerHTML =
+      chip(s.claude, `Claude · ${s.claude_model}`, 'Claude key missing') +
+      chip(s.groq, 'Groq · fallback + voice', 'Groq key missing', true) +
+      chip(s.wikimedia, 'News clips · Wikimedia', 'News clips off (no contact)', true) +
+      chip(s.facebook, 'Facebook page connected', 'Facebook not set');
+  } catch (e) { $('status').innerHTML = '<span class="gn-chip gn-chip--err">Studio offline</span>'; }
+}
+
+/* ---------- chapters ---------- */
+const TYPES = [['broll', 'B-roll'], ['still', 'Photo'], ['clip', 'News clip']];
+function chRow(c = {visual: {type: 'still', query: ''}, say: ''}) {
+  const d = document.createElement('div'); d.className = 'dd-ch';
+  d._visual = {...(c.visual || {})};
+  d.innerHTML = `<div class="dd-ch__num"></div>
+   <div class="dd-ch__body">
+    <div class="dd-ch__top">
+      <div class="gn-seg ctype">${TYPES.map(([v, l]) => `<button data-v="${v}">${l}</button>`).join('')}</div>
+      <input class="gn-input cq" placeholder="What's on screen — an image / clip search">
+      <div class="dd-ch__tools">
+        <button class="gn-btn gn-btn--icon gn-btn--ghost" title="Move up" data-act="up">↑</button>
+        <button class="gn-btn gn-btn--icon gn-btn--ghost" title="Move down" data-act="down">↓</button>
+        <button class="gn-btn gn-btn--icon gn-btn--ghost" title="Remove" data-act="del">✕</button>
+      </div>
+    </div>
+    <div class="clipx">
+      <div class="gn-grid-2">
+        <div class="gn-field"><label class="gn-label">Your own clip <span class="gn-hint">· optional, in content/deep-dive/clips/ — only footage you may use</span></label><input class="gn-input cfile" placeholder="deep-dive/clips/mahama-speech.mp4"></div>
+        <div class="gn-field"><label class="gn-label">Credit for your clip</label><input class="gn-input ccredit" placeholder="Ghana Presidency"></div>
+      </div>
+      <span class="gn-hint">Without a file, the build looks for free-to-reuse news footage (public-domain VOA / U.S. government, Creative Commons) that names the subject — or uses a photo.</span>
+    </div>
+    <textarea class="gn-textarea csay" rows="2" placeholder="Narration — one spoken sentence, numbers as words"></textarea>
+    <div class="dd-ch__meta"><span class="cw"></span><span class="ctip"></span></div>
+   </div>`;
+  const typeSeg = d.querySelector('.ctype');
+  const setType = v => { typeSeg.querySelectorAll('button').forEach(b => b.classList.toggle('is-on', b.dataset.v === v));
+    typeSeg.dataset.v = v; d.classList.toggle('is-clip', v === 'clip');
+    d.querySelector('.ctip').textContent = v === 'broll' ? 'Generic stock video — never name a person or place' : v === 'clip' ? 'Name the subject like a news-archive title' : 'Name the real subject (who / where)'; };
+  typeSeg.addEventListener('click', e => { const b = e.target.closest('button'); if (b) { setType(b.dataset.v); } });
+  setType(c.visual?.type || 'still');
+  d.querySelector('.cq').value = c.visual?.query || '';
+  d.querySelector('.csay').value = c.say || '';
+  d.querySelector('.cfile').value = c.visual?.file || '';
+  d.querySelector('.ccredit').value = c.visual?.credit || '';
+  d.querySelector('.csay').addEventListener('input', stats);
+  d.querySelector('.dd-ch__tools').addEventListener('click', e => {
+    const a = e.target.closest('button')?.dataset.act; if (!a) return;
+    if (a === 'del') d.remove();
+    if (a === 'up' && d.previousElementSibling) d.parentNode.insertBefore(d, d.previousElementSibling);
+    if (a === 'down' && d.nextElementSibling) d.parentNode.insertBefore(d.nextElementSibling, d);
+    stats();
+  });
+  return d;
+}
+function addCh(c) { $('chapters').appendChild(chRow(c)); }
+const words = s => (s.trim().match(/\S+/g) || []).length;
+function fmt(sec) { sec = Math.round(sec); return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`; }
+function stats() {
+  const rows = [...document.querySelectorAll('.dd-ch')]; let total = 0, secs = 1.8 + 2.2;
+  rows.forEach((d, i) => {
+    d.querySelector('.dd-ch__num').textContent = i + 1;
+    const w = words(d.querySelector('.csay').value); total += w; secs += w / 2.55 + 0.6;
+    const cw = d.querySelector('.cw'); cw.textContent = `${w} words · ≈ ${Math.round(w / 2.55 + 0.6)}s`; cw.className = 'cw' + (w > 26 ? ' is-long' : '');
+  });
+  $('stCh').textContent = rows.length; $('stWords').textContent = total; $('stDur').textContent = fmt(rows.length ? secs : 0);
+}
+
+/* ---------- spec <-> form ---------- */
+function srcToLine(s) { return (typeof s === 'string') ? s : (s.url ? `${s.name} | ${s.url}` : (s.name || '')); }
+function lineToSrc(l) { const i = l.indexOf('|'); return i >= 0 ? {name: l.slice(0, i).trim(), url: l.slice(i + 1).trim()} : {name: l.trim()}; }
+function load(s) {
+  spec = s; const p = s.post || {};
+  $('voice').value = s.voice || 'elevenlabs'; $('groq_voice').value = s.groq_voice || 'hannah';
+  $('captions').value = s.captions || 'highlight'; $('music').value = s.music ?? 'generated';
+  $('caption').value = p.caption || ''; $('body').value = p.body || '';
+  $('sources').value = (p.sources || []).map(srcToLine).join('\n');
+  $('cta').value = p.cta || ''; $('hashtags').value = (p.hashtags || []).join(' ');
+  const cv = s.cover || {}; $('cv_headline').value = cv.headline || ''; $('cv_highlight').value = cv.highlight || '';
+  $('cv_query').value = cv.query || ''; $('cv_subline').value = cv.subline || '';
+  $('chapters').innerHTML = ''; (s.chapters || []).forEach(addCh); stats(); postPreview();
+}
+function collect() {
+  const chapters = [...document.querySelectorAll('.dd-ch')].map(d => {
+    const v = {...(d._visual || {}), type: d.querySelector('.ctype').dataset.v, query: d.querySelector('.cq').value.trim()};
+    const f = d.querySelector('.cfile').value.trim(), cr = d.querySelector('.ccredit').value.trim();
+    if (v.type === 'clip' && f) v.file = f; else delete v.file;
+    if (v.type === 'clip' && cr) v.credit = cr; else delete v.credit;
+    return {visual: v, say: d.querySelector('.csay').value.trim()};
+  }).filter(c => c.say);
+  const post = {caption: $('caption').value.trim(), body: $('body').value.trim(),
+    sources: $('sources').value.split('\n').map(x => x.trim()).filter(Boolean).map(lineToSrc),
+    cta: $('cta').value.trim(), hashtags: $('hashtags').value.split(/\s+/).map(x => x.trim()).filter(Boolean)};
+  const cover = {...(spec.cover || {}), headline: $('cv_headline').value.trim(), highlight: $('cv_highlight').value.trim(),
+    query: $('cv_query').value.trim(), subline: $('cv_subline').value.trim()};
+  return {...spec, voice: $('voice').value, groq_voice: $('groq_voice').value, captions: $('captions').value,
+    music: $('music').value, cover, post, chapters};
+}
+function postPreview() {
+  const p = collect().post; const parts = [p.caption, p.body];
+  const src = p.sources.map(s => s.url ? `• ${s.name} — ${s.url}` : `• ${s.name}`).filter(x => x.trim() !== '•');
+  if (src.length) parts.push('🔗 Sources\n' + src.join('\n'));
+  if (p.cta) parts.push(p.cta);
+  parts.push((p.hashtags.length ? p.hashtags : ['#GreaterNews', '#Ghana', '#Explainer']).join(' '));
+  $('postPreview').textContent = parts.filter(Boolean).join('\n\n') || 'Your post text will appear here.';
+}
+['caption', 'body', 'sources', 'cta', 'hashtags'].forEach(id => $(id).addEventListener('input', postPreview));
+
+async function save(announce) {
+  const r = await fetch('/spec', {method: 'POST', body: JSON.stringify(collect())}); const j = await r.json(); spec = j.spec;
+  if (announce) toast('Saved.', 'ok');
+}
+
+/* ---------- preview ---------- */
+function showPane(v) {
+  const hasVid = !!$('vid').dataset.ready, hasCov = !!$('cov').dataset.ready;
+  $('vid').style.display = (v === 'video' && hasVid) ? 'block' : 'none';
+  $('cov').style.display = (v === 'cover' && hasCov) || (v === 'video' && !hasVid && hasCov) ? 'block' : 'none';
+  $('pvEmpty').style.display = (v === 'video' ? (hasVid || hasCov) : hasCov) ? 'none' : 'grid';
+}
+function showPreview() {
+  const v = $('vid'), c = $('cov');
+  v.onloadeddata = () => { v.dataset.ready = '1'; showPane((document.querySelector('#pvSeg .is-on') || {}).dataset.v); };
+  v.onerror = () => { delete v.dataset.ready; };
+  v.src = '/video?' + Date.now(); v.load();
+  c.onload = () => { c.dataset.ready = '1'; showPane((document.querySelector('#pvSeg .is-on') || {}).dataset.v); };
+  c.onerror = () => { delete c.dataset.ready; };
+  c.src = '/cover?' + Date.now();
+}
+function toggleSafe() {
+  const on = $('safe').classList.toggle('is-on'), b = $('safeBtn');
+  b.classList.toggle('gn-btn--primary', on); b.classList.toggle('gn-btn--ghost', !on);   // ghost's clear background would hide the dark label
+}
+
+/* ---------- jobs ---------- */
+async function build() {
+  await save(); const btn = $('buildBtn'); const t0 = Date.now();
+  busy(btn, true, 'Building…'); const tick = setInterval(() => { btn.innerHTML = `<span class="gn-spin"></span>Building… ${Math.round((Date.now() - t0) / 1000)}s`; }, 1000);
+  log('Building — voice, footage, captions, ffmpeg (1–4 min)…', 'gold');
+  try {
+    const j = await (await fetch('/build', {method: 'POST'})).json();
+    log(j.log.split('\n').slice(-12).join('\n'), j.ok ? 'ok' : 'err');
+    if (j.ok) { showPreview(); toast('Video built — check the preview.', 'ok'); } else toast('Build failed — see the log.', 'err');
+  } finally { clearInterval(tick); busy(btn, false); }
+}
+async function schedule() {
+  if (!confirm('Queue + schedule this to Facebook (2 hours from now, editable in Facebook until then)?')) return;
+  await save(); log('Scheduling…', 'gold');
+  const j = await (await fetch('/schedule', {method: 'POST'})).json();
+  log(j.log.split('\n').slice(-10).join('\n'), j.ok ? 'ok' : 'err'); toast(j.ok ? 'Scheduled on Facebook.' : 'Scheduling failed.', j.ok ? 'ok' : 'err');
+}
+async function postNow() {
+  if (!confirm('Post this video to the GreaterNews Facebook Page NOW? It goes live immediately — watch the preview first.')) return;
+  await save(); log('Posting…', 'gold');
+  const j = await (await fetch('/post', {method: 'POST'})).json();
+  log(j.log.split('\n').slice(-10).join('\n'), j.ok ? 'ok' : 'err'); toast(j.ok ? 'Posted to Facebook.' : 'Posting failed.', j.ok ? 'ok' : 'err');
+}
+async function research() {
+  const t = $('topic').value.trim(); if (!t) { $('topic').focus(); toast('Type a topic first.'); return; }
+  const btn = $('researchBtn'), pr = $('rprog'), rl = $('rlog'); rl.style.display = 'none';
+  let sec = 0; busy(btn, true, 'Researching…'); pr.classList.add('is-on');
+  const tick = () => { $('rprogText').textContent = `Researching “${t}” — searching the web, checking sources, writing the cited brief and script… ${sec}s (usually 1–4 min)`; };
+  tick(); const timer = setInterval(() => { sec++; tick(); }, 1000);
+  try {
+    const j = await (await fetch('/research', {method: 'POST', body: JSON.stringify({topic: t, length: lengthVal()})})).json();
+    if (j.ok) { await refresh(true); toast(`Brief + script ready (${sec}s) — review them, then Build.`, 'ok'); location.hash = '#brief'; }
+    else { rl.style.display = 'block'; rl.textContent = 'Research did not finish.\n' + (j.log || '').split('\n').slice(-10).join('\n'); toast('Research failed — see the log.', 'err'); }
+  } catch (e) { rl.style.display = 'block'; rl.textContent = 'Research failed: ' + e; }
+  finally { clearInterval(timer); pr.classList.remove('is-on'); busy(btn, false); }
+}
+function meta(s) {
+  return `<div class="gn-item__meta"><span class="gn-chip gn-chip--plain">${esc(s.bucket)}</span>${esc(s.source || '')}${s.date ? ' · ' + esc(s.date) : ''}${s.link ? ` · <a href="${esc(s.link)}" target="_blank" rel="noopener">open</a>` : ''}</div>`;
+}
+async function hot() {
+  const wrap = $('hotwrap'); wrap.style.display = 'block';
+  $('hotpicks').innerHTML = '<div class="gn-empty" style="grid-column:1/-1">Scanning headlines and ranking them for explainers…</div>'; $('hotmore').innerHTML = ''; $('hotEngine').textContent = '';
+  let j; try { j = await (await fetch('/curate')).json(); } catch (e) { $('hotpicks').innerHTML = '<div class="gn-empty">Search failed.</div>'; return; }
+  const all = j.all || []; window._hot = all; window._picks = j.picks || [];
+  if (!all.length) { $('hotpicks').innerHTML = `<div class="gn-empty" style="grid-column:1/-1">No results — check the Serper key / connection.${j.error ? ' (' + esc(j.error) + ')' : ''}</div>`; return; }
+  $('hotEngine').textContent = j.engine ? ` · ranked by ${j.engine}` : '';
+  $('hotpicks').innerHTML = window._picks.length ? window._picks.map((s, i) => `<div class="gn-item">
+      <div style="display:flex;gap:10px;align-items:flex-start"><span class="gn-score">${s.score != null ? s.score : '–'}</span><div class="gn-item__title">${esc(s.title)}</div></div>
+      ${(s.angle || s.why_now) ? `<div class="dd-angle">${esc(s.angle || '')}${(s.angle && s.why_now) ? ' — ' : ''}${esc(s.why_now || '')}</div>` : ''}
+      <div class="gn-item__foot">${meta(s)}<button class="gn-btn gn-btn--xs gn-btn--primary" onclick="pickTopic(${i})">Use</button></div></div>`).join('')
+    : '<div class="gn-empty" style="grid-column:1/-1">No ranked picks — choose from the headlines below.</div>';
+  $('hotCount').textContent = all.length;
+  $('hotmore').innerHTML = all.map((s, i) => `<div class="gn-item"><div><div class="gn-item__title" style="font-weight:500">${esc(s.title)}</div>${meta(s)}</div>
+     <button class="gn-btn gn-btn--xs" onclick="pick(${i})">Use</button></div>`).join('');
+}
+function useTopic(t) { $('topic').value = t; window.scrollTo({top: 0, behavior: 'smooth'}); $('topic').focus(); toast('Topic set — press Research when ready.'); }
+function pick(i) { useTopic(window._hot[i].title); }
+function pickTopic(i) { const s = window._picks[i]; useTopic(s.topic || s.title); }
+async function surprise() {
+  const pr = $('rprog'); pr.classList.add('is-on'); $('rprogText').textContent = 'Finding the strongest explainer-worthy story right now…';
+  let j; try { j = await (await fetch('/curate')).json(); } catch (e) { pr.classList.remove('is-on'); toast('Search failed.', 'err'); return; }
+  pr.classList.remove('is-on');
+  const top = (j.picks && j.picks[0]) || (j.all && j.all[0]); if (!top) { toast('No stories found — check the Serper key.', 'err'); return; }
+  $('topic').value = top.topic || top.title; toast('Picked: ' + top.title); await research();
+}
+
+/* ---------- brief (light markdown) ---------- */
+function md(text) {
+  const inline = s => esc(s).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>')
+    .replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
+    .replace(/(^|[\s(])(https?:\/\/[^\s)<]+)/g, '$1<a href="$2" target="_blank" rel="noopener">$2</a>');
+  return text.split('\n').map(l => {
+    if (/^#{1,6}\s/.test(l)) return `<div class="md-h">${inline(l.replace(/^#+\s/, ''))}</div>`;
+    if (/^\s*[-*]\s/.test(l)) return `<div class="md-li">${inline(l.replace(/^\s*[-*]\s/, ''))}</div>`;
+    if (/^\s*\d+\.\s/.test(l)) return `<div class="md-li md-ol">${inline(l.trim())}</div>`;
+    return l.trim() ? `<p>${inline(l)}</p>` : '';
+  }).join('');
+}
+async function refresh(openBrief) {
+  load(await (await fetch('/spec')).json());
+  const b = await (await fetch('/brief')).text();
+  $('briefBody').innerHTML = md(b);
+  const title = (b.match(/^#\s+(.+)$/m) || [])[1];
+  $('briefTitle').textContent = title ? title : 'Show brief';
+  if (openBrief) $('briefBox').open = true;
+  showPreview();
+}
+
+/* ---------- nav highlight ---------- */
+const links = [...document.querySelectorAll('#nav a')];
+const io = new IntersectionObserver(es => es.forEach(e => {
+  if (e.isIntersecting) links.forEach(a => a.classList.toggle('is-active', a.getAttribute('href') === '#' + e.target.id));
+}), {rootMargin: '-35% 0px -60% 0px'});
+document.querySelectorAll('.dd-section').forEach(s => io.observe(s));   // not the sticky preview panel — it's always in view
+
+loadStatus(); refresh(false);
+</script>
+</body>
+</html>

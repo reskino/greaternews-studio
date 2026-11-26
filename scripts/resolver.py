@@ -21,6 +21,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import requests
 
+from claude_client import MODEL, claude_json  # Claude first (Opus 5.5, official SDK); Groq is the fallback
+from claude_client import api_key as claude_api_key
+
 # Windows consoles default to cp1252, which can't print some characters.
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -28,8 +31,6 @@ if hasattr(sys.stdout, "reconfigure"):
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SECRETS_PATH = os.path.join(ROOT, "secrets.json")
 PORT = 5199
-MODEL = "claude-opus-4-8"
-MESSAGES_URL = "https://api.anthropic.com/v1/messages"
 
 # Text-to-speech defaults (overridable in secrets.json).
 DEFAULT_GOOGLE_VOICE = "en-GB-Neural2-B"
@@ -157,42 +158,12 @@ SCHEMA = {
 
 
 def load_api_key():
-    if os.path.exists(SECRETS_PATH):
-        try:
-            with open(SECRETS_PATH, encoding="utf-8") as handle:
-                data = json.load(handle)
-            key = (data.get("anthropic") or {}).get("api_key")
-            if key:
-                return key
-        except Exception as error:
-            print(f"  (could not read secrets.json: {error})")
-    return os.environ.get("ANTHROPIC_API_KEY")
+    return claude_api_key()
 
 
-def resolve(query, context, api_key):
+def resolve(query, context, api_key=None):
     user = f"Query: {query}\nStory context: {context}" if context else f"Query: {query}"
-    response = requests.post(
-        MESSAGES_URL,
-        headers={
-            "x-api-key": api_key,
-            "anthropic-version": "2023-06-01",
-            "content-type": "application/json",
-        },
-        json={
-            "model": MODEL,
-            "max_tokens": 512,
-            "output_config": {"effort": "low", "format": {"type": "json_schema", "schema": SCHEMA}},
-            "system": SYSTEM_PROMPT,
-            "messages": [{"role": "user", "content": user}],
-        },
-        timeout=30,
-    )
-    response.raise_for_status()
-    data = response.json()
-    text = next((b.get("text") for b in data.get("content", []) if b.get("type") == "text"), None)
-    if not text:
-        raise ValueError("no text block in response")
-    return json.loads(text)
+    return claude_json(SYSTEM_PROMPT, user, SCHEMA, max_tokens=4000, effort="low", timeout=30)
 
 
 def load_secrets_dict():
@@ -269,22 +240,9 @@ def synthesize(text, voice, name=""):
 
 
 def claude_beats(api_key, headline, subline, details, source):
-    response = requests.post(
-        MESSAGES_URL,
-        headers={"x-api-key": api_key, "anthropic-version": "2023-06-01", "content-type": "application/json"},
-        json={
-            "model": MODEL,
-            "max_tokens": 900,
-            "output_config": {"effort": "low", "format": {"type": "json_schema", "schema": BEATS_JSON_SCHEMA}},
-            "system": BEATS_SYSTEM_PROMPT,
-            "messages": [{"role": "user", "content": beats_user_message(headline, subline, details, source)}],
-        },
-        timeout=40,
-    )
-    response.raise_for_status()
-    data = response.json()
-    text = next((b.get("text") for b in data.get("content", []) if b.get("type") == "text"), None)
-    return clean_scenes(json.loads(text).get("scenes", []) if text else [])
+    data = claude_json(BEATS_SYSTEM_PROMPT, beats_user_message(headline, subline, details, source),
+                       BEATS_JSON_SCHEMA, max_tokens=6000, effort="low", timeout=40)
+    return clean_scenes(data.get("scenes", []))
 
 
 def groq_beats(headline, subline, details, source):
@@ -427,7 +385,8 @@ class Handler(BaseHTTPRequestHandler):
 
 def main():
     key = load_api_key()
-    status = "key loaded" if key else "NO KEY — add anthropic.api_key to secrets.json (studio will use heuristics)"
+    status = (f"Claude {MODEL} first, Groq as fallback" if key
+              else "NO Claude key — add anthropic.api_key to secrets.json (Groq / heuristics only)")
     print(f"GreaterNews resolver on http://localhost:{PORT}/resolve  ({status})")
     ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()
 
