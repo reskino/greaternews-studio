@@ -50,6 +50,13 @@ type RenderSpec = {
   cards: CardSpec[];
 };
 
+// Headless batch rendering: no network request may hang forever. Any fetch without its own signal
+// gets a 90s limit (voiceover + uploads can be slowish), so one silent server can't stall every card
+// after it — which is what froze both render runs on 2026-11-26.
+const nativeFetch = window.fetch.bind(window);
+window.fetch = (input: RequestInfo | URL, init: RequestInit = {}) =>
+  nativeFetch(input, init.signal ? init : { ...init, signal: AbortSignal.timeout(90_000) });
+
 const logElement = document.getElementById('log') as HTMLElement;
 
 function log(message: string, cls = '') {
@@ -59,6 +66,8 @@ function log(message: string, cls = '') {
     line.className = cls;
   }
   logElement.appendChild(line);
+  // Mirror to render_assets.py's console (→ the run logs): the headless page's DOM is invisible.
+  void fetch(`${SERVER}/log`, { method: 'POST', body: `${new Date().toISOString().slice(11, 19)} ${message}` }).catch(() => undefined);
 }
 
 async function upload(name: string, blob: Blob) {
@@ -202,26 +211,38 @@ async function run() {
         // licensed photo (falls back to the main photo). `clips: false` on a card turns clips off.
         let beatPhotos: BeatMedia[] = [];
         const usedClips = new Set<string>();
+        log(`${card.slug}: picking beat media for ${card.photoQueries?.length ?? 0} beat(s)…`);
         if (card.photoQueries?.length) {
           beatPhotos = await Promise.all(
             card.photoQueries.map(async (query): Promise<BeatMedia> => {
               if (!query) return null;
               if (card.clips !== false) {
-                const clip = await findBestClip(query, { strict: true, used: usedClips }).catch(() => null);
+                // Bounded: a stuck lookup falls back to a photo instead of freezing every card after it.
+                const clip = await withTimeout(findBestClip(query, { strict: true, used: usedClips }), 45_000).catch(() => null);
                 if (clip) {
                   log(`${card.slug}: beat clip "${query}" — ${clip.title} (${clip.label})`, 'ok');
                   return { video: clip.video, label: clip.label, start: clip.start };
                 }
               }
-              const best = await findBestPhoto(query).catch(() => null);
+              const best = await withTimeout(findBestPhoto(query), 45_000).catch(() => null);
               if (best) log(`${card.slug}: beat photo "${query}" — ${best.credit}`, 'ok');
               return best?.image ?? null;
             }),
           );
         }
         const hasClips = beatPhotos.some(isBeatClip);
+        log(`${card.slug}: beat media ready (${beatPhotos.filter(isBeatClip).length} clip(s), ${beatPhotos.filter((m) => m && !isBeatClip(m)).length} photo(s)) — exporting video…`);
+        const videoStarted = performance.now();
+        let nextMark = 0.1;
+        const progress = (p: number) => {
+          if (p >= nextMark) {
+            log(`${card.slug}: video ${Math.round(p * 100)}% (${Math.round((performance.now() - videoStarted) / 1000)}s)`);
+            nextMark = Math.floor(p * 10) / 10 + 0.1;
+          }
+        };
         try {
-          const { blob, extension } = await withTimeout(exportCardVideo({ ...options, format: 'story' }, { scenes: card.scenes ?? [], narration: card.narration, beatPhotos, motion: card.motion, sound: card.sound, musicUrl: card.music ? (/^https?:/.test(card.music) ? card.music : `${SERVER}/music/${card.music.split('/').pop()}`) : undefined, voice: card.voice, voiceName: card.voiceName }), hasClips ? 180_000 : 90_000); // clips are seeked frame by frame
+          const { blob, extension } = await withTimeout(exportCardVideo({ ...options, format: 'story' }, { scenes: card.scenes ?? [], narration: card.narration, beatPhotos, motion: card.motion, sound: card.sound, musicUrl: card.music ? (/^https?:/.test(card.music) ? card.music : `${SERVER}/music/${card.music.split('/').pop()}`) : undefined, voice: card.voice, voiceName: card.voiceName }, progress), hasClips ? 300_000 : 240_000); // a narrated ~50s video takes >90s to encode; clips also seek
+          log(`${card.slug}: video encoded in ${Math.round((performance.now() - videoStarted) / 1000)}s`);
           await upload(`${card.slug}_9x16.${extension}`, blob);
           rendered += 1;
           log(`✓ ${card.slug}_9x16.${extension} (${Math.round(blob.size / 1024)} KB)`, 'ok');

@@ -640,14 +640,25 @@ export async function searchSerperImages(query: string): Promise<ImageResult[]> 
   });
 }
 
-export function loadImage(url: string, crossOrigin = true) {
+export function loadImage(url: string, crossOrigin = true, timeoutMs = 30000) {
   return new Promise<HTMLImageElement>((resolve, reject) => {
     const image = new Image();
     if (crossOrigin) {
       image.crossOrigin = 'anonymous';
     }
-    image.onload = () => resolve(image);
-    image.onerror = () => reject(new Error('Image failed to load'));
+    // A server that never answers must not hang the caller (it froze the 2026-11-26 render runs).
+    const timer = window.setTimeout(() => {
+      image.src = '';
+      reject(new Error('Image load timed out'));
+    }, timeoutMs);
+    image.onload = () => {
+      window.clearTimeout(timer);
+      resolve(image);
+    };
+    image.onerror = () => {
+      window.clearTimeout(timer);
+      reject(new Error('Image failed to load'));
+    };
     image.src = url;
   });
 }

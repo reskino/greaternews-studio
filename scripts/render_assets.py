@@ -47,6 +47,10 @@ def kill_port_holders(*ports):
         print(f"  cleared stale process {pid}")
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# Page log lines carry ✓/✗ and emoji; Windows consoles default to cp1252, which crashed the receiver.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 EDGE = r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
 RECEIVER_PORT = 5198
 APP_PORT = 4179
@@ -131,6 +135,12 @@ class Handler(BaseHTTPRequestHandler):
             self._cors()
             self.end_headers()
             self.wfile.write(b"ok")
+        elif parsed.path == "/log":  # the page's own log lines (beat clips/photos, failures, timings)
+            length = int(self.headers.get("Content-Length", "0"))
+            print(f"    [page] {self.rfile.read(length).decode('utf-8', 'replace')[:300]}", flush=True)
+            self.send_response(200)
+            self._cors()
+            self.end_headers()
         else:
             self.send_response(404)
             self._cors()
@@ -208,6 +218,12 @@ try:
             "--headless=new",
             "--disable-gpu",
             "--autoplay-policy=no-user-gesture-required",
+            # A headless page counts as "in the background": Edge throttles its timers harder and harder,
+            # so a narrated video's encode crawled from ~20s to never finishing (2026-11-26). Turn it off.
+            "--disable-background-timer-throttling",
+            "--disable-renderer-backgrounding",
+            "--disable-backgrounding-occluded-windows",
+            "--disable-features=IntensiveWakeUpThrottling,CalculateNativeWinOcclusion",
             f"--remote-debugging-port={free_port()}",
             f"--user-data-dir={profile_dir}",
             f"http://localhost:{APP_PORT}/render.html",

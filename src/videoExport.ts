@@ -321,6 +321,28 @@ async function renderAudioMix(sound: VideoSound, musicBuffer: AudioBuffer | null
 
 // Preferred path: encode frames + audio deterministically with WebCodecs and mux to MP4. The audio
 // track is written straight from the rendered buffer, so it can't pick up capture artifacts.
+// Resolve when the encoder frees a queue slot (its 'dequeue' event), or on the next task tick.
+// Neither is timer-based, so background-tab timer throttling can't slow the export.
+function waitForDequeue(encoder: VideoEncoder): Promise<void> {
+  return new Promise<void>((resolve) => {
+    let settled = false;
+    const done = () => {
+      if (!settled) {
+        settled = true;
+        resolve();
+      }
+    };
+    if ('ondequeue' in encoder) {
+      encoder.addEventListener('dequeue', done, { once: true });
+    }
+    const channel = new MessageChannel(); // fallback tick (also covers a dequeue that already happened)
+    channel.port1.onmessage = () => {
+      if (!('ondequeue' in encoder)) done();
+    };
+    channel.port2.postMessage(null);
+  });
+}
+
 async function encodeWithWebCodecs(timeline: Timeline, audioBuffer: AudioBuffer | null, onProgress?: (progress: number) => void): Promise<VideoExportResult> {
   const { width, height, totalMs, stage, paint, prepare } = timeline;
 
@@ -396,12 +418,13 @@ async function encodeWithWebCodecs(timeline: Timeline, audioBuffer: AudioBuffer 
     videoEncoder.encode(frame, { keyFrame: i % FPS === 0 });
     frame.close();
     onProgress?.(Math.min(1, (i + 1) / totalFrames) * audioWeight);
-    // Backpressure: let the encoder drain so VideoFrames don't pile up in memory.
+    // Backpressure: let the encoder drain so VideoFrames don't pile up in memory. Wait on the encoder's
+    // own 'dequeue' event (or a MessageChannel tick) — NOT setTimeout, which browsers throttle on
+    // background/headless pages until a long encode crawls to a halt.
     if (videoEncoder.encodeQueueSize > 30) {
-      await new Promise<void>((resolve) => {
-        const check = () => (videoEncoder.encodeQueueSize <= 10 || encodeError ? resolve() : setTimeout(check, 4));
-        check();
-      });
+      while (videoEncoder.encodeQueueSize > 10 && !encodeError) {
+        await waitForDequeue(videoEncoder);
+      }
     }
   }
 

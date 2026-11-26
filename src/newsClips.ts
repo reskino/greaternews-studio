@@ -108,7 +108,8 @@ export async function searchCommonsVideos(query: string): Promise<ClipResult[]> 
     action: 'query', format: 'json', origin: '*', generator: 'search', gsrnamespace: '6', gsrlimit: '15',
     gsrsearch: `filetype:video ${query}`, prop: 'videoinfo', viprop: 'url|size|extmetadata|derivatives', viurlwidth: '640',
   });
-  const response = await fetch(`https://commons.wikimedia.org/w/api.php?${params.toString()}`);
+  // A stalled request must never hang a render (2026-11-26: one beat's lookup froze the whole run).
+  const response = await fetch(`https://commons.wikimedia.org/w/api.php?${params.toString()}`, { signal: AbortSignal.timeout(15000) });
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   const data = (await response.json()) as { query?: { pages?: Record<string, VideoPage> } };
   const pages = Object.values(data.query?.pages ?? {}).sort((a, b) => (a.index ?? 1e9) - (b.index ?? 1e9)); // rank, not page id
@@ -169,7 +170,11 @@ export function loadClipVideo(src: string, timeoutMs = 25000): Promise<HTMLVideo
     video.muted = true;
     video.playsInline = true;
     video.preload = 'auto';
-    const timer = window.setTimeout(() => reject(new Error('clip load timed out')), timeoutMs);
+    const timer = window.setTimeout(() => {
+      video.removeAttribute('src'); // stop the download too, not just the wait
+      video.load();
+      reject(new Error('clip load timed out'));
+    }, timeoutMs);
     video.onloadeddata = () => {
       window.clearTimeout(timer);
       resolve(video);
