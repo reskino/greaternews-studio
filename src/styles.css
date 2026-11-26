@@ -410,6 +410,48 @@ body,
     font-size: 13px;
 }
 
+.ai-flow__auto {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+}
+
+.ai-flow__auto .gn-btn {
+    min-height: 44px;
+    max-width: 100%;
+    white-space: normal;
+}
+
+.ai-flow__manual {
+    margin-top: 4px;
+    border-top: 1px dashed var(--gn-line);
+    padding-top: 10px;
+}
+
+.ai-flow__manual > summary {
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--gn-text-2);
+    list-style: none;
+    margin-bottom: 10px;
+}
+
+.ai-flow__manual > summary::-webkit-details-marker {
+    display: none;
+}
+
+.ai-flow__manual > summary::before {
+    content: '› ';
+    color: var(--gn-gold);
+}
+
+.ai-flow__manual[open] > summary::before {
+    content: '⌄ ';
+}
+
 .ai-flow__hint {
     margin: 0;
 }

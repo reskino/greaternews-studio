@@ -11,7 +11,9 @@ import type { CommandMode, LiveFeedState, PostedLogEntry, StoryCategory, StoryDr
 import StepHead, { Panel } from './ui/StepHead';
 import { usePostedLog } from './usePostedLog';
 
-const APP_VERSION = '2.1.0';
+const APP_VERSION = '2.2.0';
+// The GreaterNews helper on this PC (scripts/resolver.py) — holds the Claude key for one-click drafting.
+const CLAUDE_HELPER = 'http://localhost:5199';
 const today = new Date().toISOString().slice(0, 10);
 
 const commandModes: Array<{ value: CommandMode; label: string }> = [
@@ -367,6 +369,69 @@ export default function App() {
     window.setTimeout(() => setPasteMessage(''), 4000);
   }
 
+  // One-click drafting through the GreaterNews helper on this PC (scripts/resolver.py), which holds the
+  // Claude key — a public web page can't keep a key secret. It answers only the GreaterNews studio
+  // (origin check). Where it isn't running, the manual copy/paste steps below still work.
+  const [helper, setHelper] = useState<'checking' | 'online' | 'offline'>('checking');
+  const [autoState, setAutoState] = useState<'idle' | 'busy'>('idle');
+  const [autoSeconds, setAutoSeconds] = useState(0);
+
+  useEffect(() => {
+    let alive = true;
+    fetch(`${CLAUDE_HELPER}/health`, { signal: AbortSignal.timeout(2500) })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data: { claude?: boolean } | null) => {
+        if (alive) setHelper(data?.claude ? 'online' : 'offline');
+      })
+      .catch(() => {
+        if (alive) setHelper('offline');
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  async function draftWithClaude() {
+    if (autoState === 'busy') {
+      return;
+    }
+    setAutoState('busy');
+    setAutoSeconds(0);
+    const started = Date.now();
+    const timer = window.setInterval(() => setAutoSeconds(Math.round((Date.now() - started) / 1000)), 1000);
+    try {
+      let excerpt = '';
+      if (draft.link) {
+        try {
+          excerpt = await fetchArticleExcerpt(draft.link);
+        } catch {
+          // Article not reachable — the brief still works from the feed summary.
+        }
+      }
+      const response = await fetch(`${CLAUDE_HELPER}/draft`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain' }, // a "simple" request: no extra CORS round-trip
+        body: buildClaudeBrief(draft, excerpt),
+        signal: AbortSignal.timeout(480_000),
+      });
+      const data = (await response.json()) as { text?: string; error?: string };
+      const fields = data.text ? parsePackFields(data.text) : null;
+      if (fields) {
+        setDraft((current) => ({ ...current, ...fields }));
+        setPasteMessage(`Claude verified the story and filled ${Object.keys(fields).length} fields — review them below.`);
+      } else {
+        setPasteMessage(data.error ? `Claude couldn't draft it: ${data.error}` : "Claude's reply had no fields block — try again, or use the manual steps.");
+      }
+    } catch {
+      setHelper('offline');
+      setPasteMessage('The Claude helper on this PC is not answering — use the manual steps below.');
+    } finally {
+      window.clearInterval(timer);
+      setAutoState('idle');
+      window.setTimeout(() => setPasteMessage(''), 9000);
+    }
+  }
+
   function handleImportFile(files: FileList | null) {
     const file = files?.[0];
     if (!file) {
@@ -689,6 +754,22 @@ export default function App() {
 
               <div className="ai-flow">
                 <span className="ai-flow__label">Fast AI drafting</span>
+                <div className="ai-flow__auto">
+                  <button type="button" className="gn-btn gn-btn--primary" onClick={() => void draftWithClaude()} disabled={helper !== 'online' || autoState === 'busy'}>
+                    {autoState === 'busy' ? <span className="gn-spin" aria-hidden="true" /> : <span aria-hidden="true">✨</span>}
+                    {autoState === 'busy' ? `Claude is verifying the story… ${autoSeconds}s` : 'Draft with Claude — automatic'}
+                  </button>
+                  <span className={`gn-chip ${helper === 'online' ? 'gn-chip--ok' : helper === 'offline' ? 'gn-chip--warn' : ''}`}>
+                    {helper === 'online' ? 'Claude helper on this PC · ready' : helper === 'offline' ? 'Helper not running on this device' : 'Checking…'}
+                  </span>
+                </div>
+                <p className="gn-hint ai-flow__hint">
+                  {helper === 'offline'
+                    ? 'The automatic button works on the GreaterNews PC, where the Claude helper runs (it starts with the PC). On other devices, use the three steps below.'
+                    : 'One click: Claude searches the web, checks 2+ independent sources and fills every field below — about a minute.'}
+                </p>
+                <details className="ai-flow__manual" open={helper === 'offline'}>
+                  <summary>Or do it by hand with claude.ai</summary>
                 <div className="ai-flow__steps">
                   <button type="button" className="gn-btn gn-btn--sm gn-btn--primary" onClick={() => void copyBriefWithContext()} disabled={briefState === 'busy'}>
                     {briefState === 'busy' ? <span className="gn-spin" aria-hidden="true" /> : null}
@@ -702,6 +783,7 @@ export default function App() {
                   </button>
                 </div>
                 <p className="gn-hint ai-flow__hint">The brief packages the story with article context; the pack fills every field below automatically.</p>
+                </details>
               </div>
               {pasteMessage ? <p className="app-note app-note--flash">{pasteMessage}</p> : null}
 

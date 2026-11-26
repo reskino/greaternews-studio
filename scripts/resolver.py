@@ -27,6 +27,7 @@ import requests
 
 from claude_client import MODEL, claude_json  # Claude first (Opus 5.5, official SDK); Groq is the fallback
 from claude_client import api_key as claude_api_key
+from claude_client import ClaudeUnavailable, claude_research
 
 # Windows consoles default to cp1252, which can't print some characters.
 if hasattr(sys.stdout, "reconfigure"):
@@ -35,6 +36,7 @@ if hasattr(sys.stdout, "reconfigure"):
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SECRETS_PATH = os.path.join(ROOT, "secrets.json")
 PORT = 5199
+ALLOWED_ORIGINS = {"https://reskino.github.io"}  # the live studio (GitHub Pages)
 
 # Text-to-speech defaults (overridable in secrets.json).
 DEFAULT_GOOGLE_VOICE = "en-GB-Neural2-B"
@@ -370,12 +372,50 @@ class Handler(BaseHTTPRequestHandler):
     def do_OPTIONS(self):
         self.send_response(204)
         self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "*")
+        # Chromium asks before a public site (the live studio) may call this PC's helper.
+        self.send_header("Access-Control-Allow-Private-Network", "true")
         self.end_headers()
+
+    def _origin_allowed(self):
+        """Costly endpoints (they spend the Claude credit) only answer the GreaterNews studio — the live
+        site or a local copy — so no other website open in the browser can use this PC's helper."""
+        origin = (self.headers.get("Origin") or "").rstrip("/")
+        return (not origin or origin in ALLOWED_ORIGINS
+                or re.match(r"^http://(localhost|127\.0\.0\.1)(:\d+)?$", origin) is not None)
+
+    def do_POST(self):
+        parsed = urllib.parse.urlparse(self.path)
+        if parsed.path != "/draft":
+            self._send(404, {"error": "not found"})
+            return
+        if not self._origin_allowed():
+            self._send(403, {"error": "origin not allowed"})
+            return
+        length = int(self.headers.get("Content-Length", "0") or 0)
+        brief = self.rfile.read(min(length, 60000)).decode("utf-8", "replace").strip()
+        if not brief:
+            self._send(400, {"error": "missing brief"})
+            return
+        try:
+            # The brief (outputs.ts buildClaudeBrief) tells Claude to verify with 2+ sources and end with
+            # the ===FIELDS=== block the studio imports — the same text a manual paste would give.
+            text, usage = claude_research(
+                "You are the GreaterNews content engine. Use web search to verify before writing; never "
+                "invent facts, quotes, numbers or URLs.", brief, max_tokens=16000, effort="medium", timeout=420)
+            print(f"  draft: {len(text)} chars ({usage})", flush=True)
+            self._send(200, {"text": text, "engine": f"Claude {MODEL}", "usage": usage})
+        except ClaudeUnavailable as error:
+            print(f"  draft failed: {error}", flush=True)
+            self._send(502, {"error": str(error)[:300]})
 
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
+
+        if parsed.path == "/health":  # the studio checks this to offer one-click "Draft with Claude"
+            self._send(200, {"ok": True, "claude": bool(load_api_key()), "model": MODEL})
+            return
 
         if parsed.path == "/tts":
             params = urllib.parse.parse_qs(parsed.query)
