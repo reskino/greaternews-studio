@@ -63,9 +63,11 @@ def main(spec_path):
 
     text = build_post_text(spec.get("post", {}))
 
-    queue = {"date": f"deepdive_{slug}", "items": [
-        {"platform": "facebook", "status": "pending", "video": video_rel, "text": text}
-    ]}
+    item = {"platform": "facebook", "status": "pending", "video": video_rel, "text": text}
+    cover_rel = f"deep-dive/{slug}_cover.png"   # the build's cover card -> the video's thumbnail
+    if os.path.exists(os.path.join(ROOT, "content", cover_rel)):
+        item["thumb"] = cover_rel
+    queue = {"date": f"deepdive_{slug}", "items": [item]}
     out = os.path.join(ROOT, "content", f"queue_deepdive_{slug}.json")
     with open(out, "w", encoding="utf-8", newline="\n") as handle:
         json.dump(queue, handle, indent=2, ensure_ascii=False)

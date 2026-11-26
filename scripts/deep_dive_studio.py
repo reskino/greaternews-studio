@@ -210,6 +210,12 @@ details summary{cursor:pointer;color:var(--gold)}
     <div><label>Captions</label><select id=captions><option value=highlight>Highlight box</option><option value=word>Word-by-word</option></select></div>
     <div><label>Music</label><select id=music><option value=generated>Generated pad</option><option value="">None</option></select></div>
   </div>
+  <label>Cover card headline <span class=small>— the opening frame + Facebook thumbnail, same design as the image posts (6–9 words)</span></label><input id=cv_headline placeholder="How Senegal Won Back The AFCON Title">
+  <div class=row>
+    <div><label>Gold words <span class=small>(from the headline)</span></label><input id=cv_highlight placeholder="Won Back"></div>
+    <div><label>Cover photo search</label><input id=cv_query placeholder="Senegal national football team AFCON trophy"></div>
+  </div>
+  <label>Cover subline <span class=small>— one short sentence under the headline</span></label><input id=cv_subline>
   <label>Post caption (Facebook) — the hook</label><textarea id=caption rows=3></textarea>
   <label>Body — 2-3 lines of key facts</label><textarea id=body rows=3></textarea>
   <label>Sources — one per line: <span class=small>Name | https://url</span></label><textarea id=sources rows=5 placeholder="U.S. EIA | https://www.eia.gov/...
@@ -226,9 +232,12 @@ CNN | https://www.cnn.com/..."></textarea>
 <div class=card>
   <div class=row><button onclick=save()>Save</button>
   <button onclick=build()>Build video</button>
-  <button class=ghost onclick=schedule()>Queue + Schedule to Facebook</button></div>
+  <button class=ghost onclick=schedule()>Queue + Schedule to Facebook</button>
+  <button class=ghost onclick=postNow()>Post to Facebook now</button></div>
   <div id=log class=log style="display:none;margin-top:12px"></div>
-  <video id=vid controls style="display:none"></video>
+  <div class=row style="align-items:flex-start;margin-top:12px">
+    <img id=cov alt="cover card" style="display:none;flex:0 0 220px;width:220px;border-radius:10px">
+    <video id=vid controls style="display:none"></video></div>
 </div>
 </div>
 <script>
@@ -248,6 +257,8 @@ function load(s){spec=s;const p=s.post||{};$('voice').value=s.voice||'elevenlabs
  $('caption').value=p.caption||'';$('body').value=p.body||'';
  $('sources').value=(p.sources||[]).map(srcToLine).join('\n');
  $('cta').value=p.cta||'';$('hashtags').value=(p.hashtags||[]).join(' ');
+ const cv=s.cover||{};$('cv_headline').value=cv.headline||'';$('cv_highlight').value=cv.highlight||'';
+ $('cv_query').value=cv.query||'';$('cv_subline').value=cv.subline||'';
  $('chapters').innerHTML='';(s.chapters||[]).forEach(addCh);}
 function collect(){const chapters=[...document.querySelectorAll('.ch')].map(d=>({
   visual:{type:d.querySelector('.ctype').value,query:d.querySelector('.cq').value.trim()},
@@ -255,15 +266,21 @@ function collect(){const chapters=[...document.querySelectorAll('.ch')].map(d=>(
  const post={caption:$('caption').value.trim(),body:$('body').value.trim(),
   sources:$('sources').value.split('\n').map(x=>x.trim()).filter(Boolean).map(lineToSrc),
   cta:$('cta').value.trim(),hashtags:$('hashtags').value.split(/\s+/).map(x=>x.trim()).filter(Boolean)};
+ const cover={...(spec.cover||{}),headline:$('cv_headline').value.trim(),highlight:$('cv_highlight').value.trim(),
+  query:$('cv_query').value.trim(),subline:$('cv_subline').value.trim()};
  return {...spec,voice:$('voice').value,groq_voice:$('groq_voice').value,captions:$('captions').value,
-  music:$('music').value,post,chapters};}
+  music:$('music').value,cover,post,chapters};}
 async function save(){const r=await fetch('/spec',{method:'POST',body:JSON.stringify(collect())});const j=await r.json();spec=j.spec;flash('Saved.');}
 function flash(m,cls=''){const l=$('log');l.style.display='block';l.innerHTML+=`\n${cls?`<span class=${cls}>`:''}${m}${cls?'</span>':''}`;l.scrollTop=l.scrollHeight;}
 async function build(){await save();flash('Building… (1–2 min, TTS + b-roll + ffmpeg)');const r=await fetch('/build',{method:'POST'});const j=await r.json();
  flash(j.log.split('\n').slice(-8).join('\n'), j.ok?'ok':'x');
- if(j.ok){const v=$('vid');v.style.display='block';v.src='/video?'+Date.now();v.load();flash('Done — preview above.','ok');}}
+ if(j.ok){showPreview();flash('Done — preview below.','ok');}}
+function showPreview(){const v=$('vid');v.style.display='block';v.src='/video?'+Date.now();v.load();
+ const c=$('cov');c.onerror=()=>{c.style.display='none';};c.onload=()=>{c.style.display='block';};c.src='/cover?'+Date.now();}
 async function schedule(){if(!confirm('Queue + schedule this to Facebook (2h out, reviewable in FB first)?'))return;
  await save();flash('Scheduling…');const r=await fetch('/schedule',{method:'POST'});const j=await r.json();flash(j.log.split('\n').slice(-10).join('\n'), j.ok?'ok':'x');}
+async function postNow(){if(!confirm('Post this video to the GreaterNews Facebook Page NOW? It goes live immediately — watch the preview first.'))return;
+ await save();flash('Posting…');const r=await fetch('/post',{method:'POST'});const j=await r.json();flash(j.log.split('\n').slice(-10).join('\n'), j.ok?'ok':'x');}
 async function research(){const t=$('topic').value.trim();if(!t)return;const rl=$('rlog');rl.style.display='block';
  let sec=0;const tick=()=>{rl.textContent='🔎 Researching "'+t+'" … '+sec+'s  (usually 1–3 min: searching the web + writing the cited brief)';};tick();
  const timer=setInterval(()=>{sec++;tick();},1000);
@@ -319,6 +336,12 @@ class H(BaseHTTPRequestHandler):
             return self._send(200, open(md, encoding="utf-8").read() if os.path.exists(md) else "(no brief yet — Research a topic)", "text/plain; charset=utf-8")
         if path == "/video":
             return self._serve_video()
+        if path == "/cover":
+            spec = json.load(open(SPEC, encoding="utf-8")) if os.path.exists(SPEC) else {}
+            png = os.path.join(DD, f"{spec.get('slug', '')}_cover.png")
+            if not os.path.exists(png):
+                return self._send(404, "no cover")
+            return self._send(200, open(png, "rb").read(), "image/png")
         if path == "/trending":
             try:
                 return self._send(200, json.dumps({"stories": trending_stories()}))
@@ -368,7 +391,7 @@ class H(BaseHTTPRequestHandler):
             with open(SPEC, "w", encoding="utf-8", newline="\n") as h:
                 json.dump(spec, h, indent=2, ensure_ascii=False)
             return self._send(200, json.dumps({"ok": True, "spec": spec}))
-        if path in ("/build", "/schedule", "/research"):
+        if path in ("/build", "/schedule", "/post", "/research"):
             if not JOB_LOCK.acquire(blocking=False):
                 return self._send(200, json.dumps(
                     {"ok": False, "log": "Another job (build/research/schedule) is already running — "
@@ -377,12 +400,15 @@ class H(BaseHTTPRequestHandler):
                 if path == "/build":
                     code, out = run([os.path.join("scripts", "deep_dive_build.py"), SPEC])
                     return self._send(200, json.dumps({"ok": code == 0, "log": out}))
-                if path == "/schedule":
+                if path in ("/schedule", "/post"):
+                    # /schedule: lands in Facebook's scheduled queue 2h out; /post: goes live now
+                    # (like the daily image posts). Either way the cover card is the thumbnail.
                     slug = json.load(open(SPEC, encoding="utf-8"))["slug"]
                     c1, o1 = run([os.path.join("scripts", "deep_dive_publish.py"), SPEC])
-                    c2, o2 = run([os.path.join("scripts", "publish.py"), "--date", f"deepdive_{slug}",
-                                  "--all", "--schedule", "+2h"])
-                    return self._send(200, json.dumps({"ok": c1 == 0 and c2 == 0, "log": o1 + "\n" + o2}))
+                    when = ["--schedule", "+2h"] if path == "/schedule" else []
+                    c2, o2 = run([os.path.join("scripts", "publish.py"), "--date", f"deepdive_{slug}", "--all"] + when)
+                    ok = c1 == 0 and c2 == 0 and "FAILED" not in o2
+                    return self._send(200, json.dumps({"ok": ok, "log": o1 + "\n" + o2}))
                 topic = json.loads(body).get("topic", "").strip()  # /research
                 return self._research(topic)
             finally:
@@ -398,12 +424,19 @@ class H(BaseHTTPRequestHandler):
             f"Africa angle if relevant, timeline, key facts (each with a source), the numbers, what's next, "
             f"and a numbered References list with URLs. (2) content/deep-dive/spec.json with EXACTLY this shape: "
             f'{{"slug":"{slug}","captions":"highlight","music":"generated","voice":"groq","groq_voice":"hannah",'
+            f'"cover":{{"headline":"6-9 word Title Case card headline","highlight":"2-4 words of it to colour gold",'
+            f'"subline":"one short sentence of context, under 16 words",'
+            f'"query":"a concrete image search for the cover photo naming the real subject"}},'
             f'"post":{{"caption":"a punchy 1-2 sentence hook","body":"2-3 lines of the key facts",'
             f'"sources":[{{"name":"Outlet (what it backs)","url":"https://real-url-from-your-research"}}],'
             f'"cta":"Follow GreaterNews - news you can trust.","hashtags":["#GreaterNews","#Ghana","#Explainer"]}},'
             f'"chapters":[{{"say":"one spoken sentence ~18-26 words, facts only","visual":{{"type":"broll or still",'
             f'"query":"a concrete Pexels/Google image subject"}}}}]}} — 6 to 7 chapters that arc: hook, what/where, '
             f"why it matters, why now, the numbers, the local impact, what's next. Facts only from your sources. "
+            f"Write numbers and dates in 'say' as WORDS (e.g. 'one-nil', 'June twenty-fourth') so the voice reads "
+            f"them right; captions turn them into digits. 'still' queries are Google image searches that name the "
+            f"real subject; 'broll' queries are generic Pexels stock-VIDEO searches that must literally show what "
+            f"is said (never name a person or place in a broll query; use a still for anything specific). "
             f"The final chapter's spoken 'say' MUST end with the exact sign-off: Follow GreaterNews, news you can trust."
         )
         try:

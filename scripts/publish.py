@@ -139,13 +139,27 @@ def publish_facebook(item, creds, scheduled_ts=None):
         if scheduled_ts:
             vdata["published"] = "false"
             vdata["scheduled_publish_time"] = str(scheduled_ts)
+        # Optional custom thumbnail (e.g. a Deep Dive's cover card) so the feed shows the headline
+        # card, not whatever frame Facebook picks.
+        thumb = item.get("thumb")
+        thumb_path = os.path.join(ROOT, "content", thumb) if thumb else None
+        if thumb_path and not os.path.exists(thumb_path):
+            thumb_path = None
         with open(video_path, "rb") as handle:
-            response = requests.post(
-                f"{GRAPH_VIDEO}/{page_id}/videos",
-                data=vdata,
-                files={"source": handle},
-                timeout=300,
-            )
+            files = {"source": handle}
+            thumb_handle = open(thumb_path, "rb") if thumb_path else None
+            try:
+                if thumb_handle:
+                    files["thumb"] = (os.path.basename(thumb_path), thumb_handle, "image/png")
+                response = requests.post(
+                    f"{GRAPH_VIDEO}/{page_id}/videos",
+                    data=vdata,
+                    files=files,
+                    timeout=300,
+                )
+            finally:
+                if thumb_handle:
+                    thumb_handle.close()
         response.raise_for_status()
         return response.json().get("id", "")
 

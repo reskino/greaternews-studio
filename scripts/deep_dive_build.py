@@ -24,7 +24,7 @@ import time
 import unicodedata
 
 import requests
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SECRETS = json.load(open(os.path.join(ROOT, "secrets.json"), encoding="utf-8"))
@@ -187,6 +187,151 @@ def words_from_alignment(chars, starts, ends):
     if cur:
         words.append((cur, ws, we))
     return words
+
+
+# ---------- captions: spoken numbers -> digits ----------
+# Narration spells numbers out so the voice reads them right ("one-nil", "June twenty-fourth"); on
+# screen they should read like a news graphic ("1-0", "June 24"). News style: small cardinals
+# ("seven weeks", "one of the largest") stay as words; 10+, decimals, scores, %, dates and years
+# become digits. Merged words keep the first word's start and the last word's end time.
+_UNITS = {w: i for i, w in enumerate(
+    "zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen "
+    "sixteen seventeen eighteen nineteen".split())}
+_TENS = {w: 10 * (i + 2) for i, w in enumerate("twenty thirty forty fifty sixty seventy eighty ninety".split())}
+_SCALES = {"hundred": 100, "thousand": 1000, "million": 10**6, "billion": 10**9, "trillion": 10**12}
+_ORD_TO_CARD = {"first": "one", "second": "two", "third": "three", "fifth": "five", "eighth": "eight",
+                "ninth": "nine", "twelfth": "twelve"}
+for _w in _UNITS:
+    if _w != "zero" and _w not in _ORD_TO_CARD.values():
+        _ORD_TO_CARD[_w + "th"] = _w                       # fourth, sixth, tenth, eighteenth...
+for _w in _TENS:
+    _ORD_TO_CARD[_w[:-1] + "ieth"] = _w                    # twentieth, thirtieth...
+for _w in _SCALES:
+    _ORD_TO_CARD[_w + "th"] = _w                           # hundredth, thousandth...
+_NUMBER_WORDS = set(_UNITS) | set(_TENS) | set(_SCALES) | set(_ORD_TO_CARD)
+_MONTHS = set("january february march april may june july august september october november december".split())
+_YEAR_CONTEXT = _MONTHS | {"in", "since", "until", "by", "of", "from", "to", "season", "year"}
+
+
+def _cardinal(toks):
+    """'two thousand and twenty-six' -> 2026; None if the tokens aren't exactly one number."""
+    total, cur, last = 0, 0, None
+    for t in toks:
+        if t == "and":
+            if last not in ("hundred", "scale"):
+                return None
+            continue
+        if t in _UNITS:
+            v = _UNITS[t]
+            if last in ("unit", "teen") or (last == "tens" and (v >= 10 or v == 0)):
+                return None
+            cur, last = cur + v, ("teen" if v >= 10 else "unit")
+        elif t in _TENS:
+            if last in ("unit", "teen", "tens"):
+                return None
+            cur, last = cur + _TENS[t], "tens"
+        elif t == "hundred":
+            if last not in ("unit", "teen") or cur >= 100:
+                return None
+            cur, last = cur * 100, "hundred"
+        elif t in _SCALES:
+            if cur == 0:
+                return None
+            total, cur, last = total + cur * _SCALES[t], 0, "scale"
+        else:
+            return None
+    return None if last is None else total + cur
+
+
+def _ordinal_suffix(n):
+    return "th" if 10 <= n % 100 <= 13 else {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
+
+
+def _spoken_number(toks, prev):
+    """Display text for a run of number tokens, or None to leave the words as spoken."""
+    if toks[-1] == "nil":                                  # scores: "one-nil" -> 1-0
+        n = 0 if toks[:-1] == ["nil"] else _cardinal(toks[:-1])
+        return None if n is None else f"{n}-0"
+    if "point" in toks:                                    # "seven point four" / "... point five eight billion"
+        k = toks.index("point")
+        whole, rest = _cardinal(toks[:k]), toks[k + 1:]
+        scale = rest.pop() if rest and rest[-1] in ("million", "billion", "trillion") else None
+        if whole is None or not rest or any(_UNITS.get(t, 99) > 9 for t in rest):
+            return None
+        return f"{whole:,}." + "".join(str(_UNITS[t]) for t in rest) + (f" {scale}" if scale else "")
+    if toks[-1] in _ORD_TO_CARD:                           # ordinals: dates or 10th+
+        n = _cardinal(toks[:-1] + [_ORD_TO_CARD[toks[-1]]])
+        if n is None:
+            return None
+        if prev in _MONTHS:
+            return str(n)
+        return f"{n}{_ordinal_suffix(n)}" if n >= 10 else None
+    n = _cardinal(toks)
+    if n is None and len(toks) >= 2 and toks[0] in _UNITS and 11 <= _UNITS[toks[0]] <= 19 or (
+            n is None and len(toks) >= 2 and toks[0] in _TENS):
+        rest = _cardinal(toks[1:])                         # years: "twenty twenty-five" -> 2025
+        head = _UNITS.get(toks[0]) or _TENS.get(toks[0])
+        if rest is not None and 10 <= rest <= 99 and toks[1] not in _SCALES:
+            return str(head * 100 + rest)
+        return None
+    if n is None or n < 10:
+        return None
+    if toks[-1] in ("million", "billion", "trillion") and n >= 10**6:
+        return f"{n / _SCALES[toks[-1]]:g} {toks[-1]}"     # "ten billion" -> 10 billion
+    if 1900 <= n <= 2100 and prev in _YEAR_CONTEXT:
+        return str(n)
+    return f"{n:,}"
+
+
+def _split_punct(text):
+    m = re.match(r"^([\"'“‘(\[]*)(.*?)([\"'”’)\].,;:!?]*)$", text)
+    return m.group(1), m.group(2), m.group(3)
+
+
+def digitize_words(words):
+    """Merge spoken-number word runs into digit tokens for the captions (timing preserved)."""
+    out, i = [], 0
+    parts = [_split_punct(w[0]) for w in words]
+
+    def toks_of(core):
+        return core.lower().split("-")
+
+    def is_num(k, first):
+        ts = toks_of(parts[k][1])
+        if not parts[k][1]:
+            return False
+        if first:  # a run starts on a number word ("one-nil" and "nil-nil" included)
+            return ((ts[0] in _NUMBER_WORDS or (ts[0] == "nil" and len(ts) > 1))
+                    and all(t in _NUMBER_WORDS or t == "nil" for t in ts[1:]))
+        return all(t in _NUMBER_WORDS or t in ("and", "point", "nil") for t in ts)
+
+    while i < len(words):
+        if not is_num(i, True):
+            out.append(words[i])
+            i += 1
+            continue
+        j = i
+        while j + 1 < len(words) and not parts[j][2] and is_num(j + 1, False):
+            j += 1                                         # extend the run until punctuation
+        prev = _split_punct(words[i - 1][0])[1].lower() if i else ""
+        for k in range(j, i - 1, -1):                      # longest phrase that reads as one number
+            toks = [t for w in range(i, k + 1) for t in toks_of(parts[w][1])]
+            if toks[-1] == "and":
+                continue
+            shown = _spoken_number(toks, prev)
+            if shown is None:
+                continue
+            end_k, tail = k, parts[k][2]
+            nxt = _split_punct(words[k + 1][0]) if k + 1 < len(words) else ("", "", "")
+            if not tail and nxt[1].lower() == "percent":   # "forty percent" -> 40%
+                shown, end_k, tail = shown + "%", k + 1, nxt[2]
+            out.append((parts[i][0] + shown + tail, words[i][1], words[end_k][2]))
+            i = end_k + 1
+            break
+        else:
+            out.append(words[i])
+            i += 1
+    return out
 
 
 def ass_time(t):
@@ -388,19 +533,172 @@ def find_still(q, path):
     return False
 
 
+_BROLL_GENERIC = {"the", "and", "with", "for", "from", "into", "near", "over", "view", "shot", "video", "footage",
+                  "clip", "close", "slow", "motion", "scene", "people", "person", "man", "woman", "very"}
+
+
+def _stems(text):
+    """Crude stems for matching a query to a Pexels slug: 'celebrating'~'celebration', 'flags'~'flag',
+    and 'soccer'~'football' (they're the same sport for our audience)."""
+    out = set()
+    for w in re.findall(r"[a-z]+", text.lower()):
+        if len(w) > 2 and w not in _BROLL_GENERIC:
+            w = "football" if w in ("soccer", "soccers") else w
+            w = w[:-1] if w.endswith("s") and len(w) > 3 else w
+            out.add(w[:5])
+    return out
+
+
+# For a Ghana audience "football" is soccer; Pexels' "football" mixes in American football
+# (an end zone and goalposts under AFCON narration), so search "soccer" and refuse those clips.
+_NOT_OUR_FOOTBALL = {"american", "nfl", "touchdown", "quarterback", "gridiron", "helmet", "rugby"}
+
+
+def _broll_search_query(q):
+    if re.search(r"\bamerican football\b", q, re.I):
+        return q
+    return re.sub(r"\bfootball\b", "soccer", q, flags=re.I)
+
+
 def pexels_video(q, path):
+    """Pick the clip whose description (the pexels.com URL slug) best matches the query, in Pexels'
+    own rank order on ties. Clips that don't match enough are refused (the caller falls back to a
+    still) — a loosely related clip under specific narration misleads viewers. Downloads ~1080p,
+    not 4K. (Previously this took the highest-resolution clip of all results, regardless of match.)"""
     r = requests.get("https://api.pexels.com/videos/search", headers={"Authorization": SECRETS["pexels"]["api_key"]},
-                     params={"query": q, "per_page": 8, "orientation": "portrait", "size": "medium"}, timeout=30)
+                     params={"query": _broll_search_query(q), "per_page": 12, "orientation": "portrait",
+                             "size": "medium"}, timeout=30)
+    want = _stems(q)
+    refuse = _NOT_OUR_FOOTBALL - set(re.findall(r"[a-z]+", q.lower()))
+    need = max(1, -(-len(want) // 3))                      # match at least a third of the query's words
     best = None
     for v in r.json().get("videos", []):
-        for f in v["video_files"]:
-            if (f.get("height") or 0) >= (f.get("width") or 0) and f.get("file_type") == "video/mp4":
-                if best is None or (f.get("height") or 0) > best[0]:
-                    best = ((f.get("height") or 0), f["link"])
+        files = [f for f in v.get("video_files", [])
+                 if f.get("file_type") == "video/mp4" and (f.get("height") or 0) >= (f.get("width") or 0)
+                 and (f.get("height") or 0) >= 1080]
+        if not files:
+            continue
+        slug = (v.get("url") or "").rstrip("/").rsplit("/", 1)[-1]
+        if refuse & set(slug.split("-")):
+            continue
+        score = len(want & _stems(slug))
+        if score >= need and (best is None or score > best[0]):
+            fits = [f for f in files if f["height"] <= 1920]
+            pick = max(fits, key=lambda f: f["height"]) if fits else min(files, key=lambda f: f["height"])
+            best = (score, pick["link"], slug)
     if not best:
         return False
-    open(path, "wb").write(requests.get(best[1], timeout=120).content)
+    open(path, "wb").write(requests.get(best[1], timeout=180).content)
+    print(f"    b-roll: {best[2]} (matched {best[0]}/{len(want)})")
     return True
+
+
+COVER_SECS = 1.8   # opening card (also the Facebook thumbnail)
+END_SECS = 2.2     # closing brand card
+SEG_ENCODE = ["-r", "30", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-video_track_timescale", "30000",
+              "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2"]
+
+
+def _source_names(post, n=2):
+    names = []
+    for s in post.get("sources") or []:
+        name = ((s.get("name") if isinstance(s, dict) else str(s)) or "").split("(")[0].strip()
+        if name and name not in names:
+            names.append(name)
+    return names[:n]
+
+
+def render_cover(spec, work):
+    """Opening frame + thumbnail, drawn by the SAME card engine as the daily image posts
+    (src/cardEngine.ts, 9:16 'story' format, via scripts/render_assets.py) so a Deep Dive looks like
+    a GreaterNews card in the feed. Needs a built dist/. Returns the PNG path, or None (the build
+    carries on without a cover)."""
+    cover = spec.get("cover") or {}
+    headline = (cover.get("headline") or "").strip()
+    if not headline:
+        print("  (no cover headline in spec - skipping the cover card)")
+        return None
+    query = cover.get("query") or next(
+        (c["visual"]["query"] for c in spec["chapters"] if c["visual"]["type"] == "still"), "")
+    photo_url, jpg = None, os.path.join(work, "cover_photo.jpg")
+    if query and find_still(query, jpg):
+        with Image.open(jpg) as im:
+            im = im.convert("RGB")
+            im.thumbnail((1600, 1600))
+            buf = io.BytesIO()
+            im.save(buf, "JPEG", quality=88)
+        photo_url = "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()
+
+    label = f"ddcover-{spec['slug']}"
+    card_spec = os.path.join(ROOT, "content", f"cards_{label}.json")
+    out_dir = os.path.join(ROOT, "content", label)
+    names = _source_names(spec.get("post") or {})
+    card = {"slug": "cover", "template": "headline", "headline": headline,
+            "subline": cover.get("subline", ""), "highlight": cover.get("highlight", ""),
+            "footer": ("Source: " + " / ".join(names)) if names else "",
+            "dim": cover.get("dim", 0.3), "formats": ["story"], "video": False,
+            "photoUrl": photo_url, "articleUrl": None, "photoQuery": None if photo_url else (query or None)}
+    with open(card_spec, "w", encoding="utf-8") as h:
+        json.dump({"date": label, "cards": [card]}, h, ensure_ascii=False)
+    try:
+        p = subprocess.run([sys.executable, os.path.join(ROOT, "scripts", "render_assets.py"), label],
+                           cwd=ROOT, capture_output=True, text=True, timeout=300,
+                           stdin=subprocess.DEVNULL, creationflags=NO_WINDOW)
+        png = os.path.join(out_dir, "assets", "cover_9x16.png")
+        if not os.path.exists(png):
+            print(f"  (cover render failed - continuing without it: {(p.stdout or p.stderr or '').strip()[-160:]})")
+            return None
+        dst = os.path.join(work, "cover.png")
+        shutil.copy(png, dst)
+        return dst
+    except Exception as e:
+        print(f"  (cover render failed - continuing without it: {e})")
+        return None
+    finally:
+        try:
+            os.remove(card_spec)
+        except OSError:
+            pass
+        shutil.rmtree(out_dir, ignore_errors=True)
+
+
+def end_card(path):
+    """Closing brand card: GN badge, wordmark, tagline — matches the sign-off line."""
+    img = Image.new("RGB", (W, H), (6, 6, 6))
+    glow = Image.new("L", (W, H), 0)
+    ImageDraw.Draw(glow).ellipse([int(W * 0.05), int(H * 0.26), int(W * 0.95), int(H * 0.66)], fill=60)
+    img.paste(Image.new("RGB", (W, H), (243, 196, 87)), (0, 0), glow.filter(ImageFilter.GaussianBlur(170)))
+    d = ImageDraw.Draw(img)
+    cx, s = W // 2, 250
+    by = int(H * 0.36)
+    d.rounded_rectangle([cx - s // 2, by, cx + s // 2, by + s], radius=int(s * 0.24),
+                        outline=(255, 255, 255), width=8, fill=(14, 14, 16))
+    try:
+        logo = Image.open(LOGO).convert("RGBA")
+        logo.thumbnail((int(s * 0.68), int(s * 0.68)))
+        img.paste(logo, (cx - logo.width // 2, by + (s - logo.height) // 2), logo)
+    except Exception:
+        d.text((cx, by + s // 2), "GN", font=font(int(s * 0.42)), fill=(243, 196, 87), anchor="mm")
+    y = by + s + 90
+    d.text((cx, y), "G R E A T E R N E W S", font=font(58), fill=(255, 255, 255), anchor="mm")
+    d.line([cx - 90, y + 70, cx + 90, y + 70], fill=(243, 196, 87), width=5)
+    d.text((cx, y + 150), "News You Can Trust", font=font(64), fill=(243, 196, 87), anchor="mm")
+    try:
+        small = ImageFont.truetype("C:/Windows/Fonts/Poppins-Medium.ttf", 40)
+    except Exception:
+        small = font(40)
+    d.text((cx, y + 250), "Follow for more Deep Dives", font=small, fill=(200, 200, 200), anchor="mm")
+    img.save(path)
+
+
+def still_segment(png, secs, out, zoom=0.04):
+    """A short silent clip of one image with a gentle push-in (the music bed plays over it)."""
+    n = max(1, int(secs * 30))
+    fc = (f"[0:v]scale=2160:3840,zoompan=z='1+{zoom}*on/{n}':d={n}:x='iw/2-(iw/zoom/2)':"
+          f"y='ih/2-(ih/zoom/2)':s={W}x{H}:fps=30,setsar=1[v]")
+    ffmpeg(["-i", png, "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo", "-t", f"{secs:.3f}",
+            "-filter_complex", fc, "-map", "[v]", "-map", "1:a"] + SEG_ENCODE + [out])
+    return out
 
 
 def ffmpeg(args, cwd=None):
@@ -460,6 +758,13 @@ def build(spec):
     groq_voice = spec.get("groq_voice")
     cache, segments = {}, []
 
+    # Opening card — the same design as the daily image posts; also saved as the video thumbnail.
+    cover = render_cover(spec, work)
+    if cover:
+        shutil.copy(cover, os.path.join(OUT_DIR, f"{slug}_cover.png"))
+        segments.append(still_segment(cover, COVER_SECS, os.path.join(work, "seg_cover.mp4")))
+        print(f"  cover card OK -> content/deep-dive/{slug}_cover.png")
+
     # Guarantee the spoken brand sign-off closes every deep dive
     chapters = spec["chapters"]
     sign_off = "Follow GreaterNews, news you can trust."
@@ -469,18 +774,22 @@ def build(spec):
     for i, ch in enumerate(chapters):
         mp3 = os.path.join(work, f"v{i:02d}.mp3")
         words = synthesize(ch["say"], mp3, voice, groq_voice)
-        write_ass(words, os.path.join(work, f"cap{i:02d}.ass"), cap_style)
+        write_ass(digitize_words(words), os.path.join(work, f"cap{i:02d}.ass"), cap_style)
         dur = duration(mp3) + 0.4
 
         vis = ch["visual"]
         key = (vis["type"], vis["query"])
         if key not in cache:
-            asset = os.path.join(work, f"a{len(cache)}" + (".mp4" if vis["type"] == "broll" else ".jpg"))
-            ok = pexels_video(vis["query"], asset) if vis["type"] == "broll" else find_still(vis["query"], asset)
-            cache[key] = asset if ok else None
-        asset = cache[key]
+            base = os.path.join(work, f"a{len(cache)}")
+            if vis["type"] == "broll" and pexels_video(vis["query"], base + ".mp4"):
+                cache[key] = ("broll", base + ".mp4")
+            elif find_still(vis["query"], base + ".jpg"):  # stills, and b-roll with no clip that truly matches
+                cache[key] = ("still", base + ".jpg")
+            else:
+                cache[key] = (vis["type"], None)
+        kind, asset = cache[key]
 
-        if vis["type"] == "broll" and asset:
+        if kind == "broll" and asset:
             vin = ["-stream_loop", "-1", "-i", asset]
             bg_fc = f"[0:v]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},setsar=1[bg]"
         elif asset:  # still: pan WIDE images side-to-side (clean, full-frame); blurred-fill for tall ones
@@ -531,7 +840,12 @@ def build(spec):
                       os.path.join(work, f"seg{i:02d}.mp4")]
         ffmpeg(args, cwd=work)
         segments.append(os.path.join(work, f"seg{i:02d}.mp4"))
-        print(f"  chapter {i} ({vis['type']}: {vis['query']}) {'OK' if asset else 'NO ASSET'} -> {dur:.1f}s")
+        shown = kind + ("" if kind == vis["type"] else f" (no matching {vis['type']} clip)")
+        print(f"  chapter {i} ({shown}: {vis['query']}) {'OK' if asset else 'NO ASSET'} -> {dur:.1f}s")
+
+    end_png = os.path.join(work, "end.png")
+    end_card(end_png)
+    segments.append(still_segment(end_png, END_SECS, os.path.join(work, "seg_end.mp4"), zoom=0.02))
 
     out = os.path.join(OUT_DIR, f"{slug}_9x16.mp4")
     music = spec.get("music")
