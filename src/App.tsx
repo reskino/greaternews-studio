@@ -2,13 +2,16 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { MouseEvent as ReactMouseEvent } from 'react';
 import { fetchArticleExcerpt } from './article';
 import CardDesigner from './CardDesigner';
+import type { CardStatus } from './CardDesigner';
 import { fetchAllFeeds, feedSources, isAlreadyPosted, selectMenuStories, storyBuckets, storyTemplates } from './feeds';
+import { CardBriefList, FacebookPreview, InstagramPreview, ScriptTimeline, WhatsAppPreview, XPreview, parseScript } from './OutputPreviews';
 import { buildClaudeBrief, buildDailyPack, buildOutputs, buildPostedLogFile, parsePackFields } from './outputs';
 import { clampText, downloadText, formatDateTime } from './text';
-import type { CommandMode, LiveFeedState, PostedLogEntry, StoryCategory, StoryDraft, StoryStatus } from './types';
+import type { CommandMode, LiveFeedState, PostedLogEntry, StoryCategory, StoryDraft } from './types';
+import StepHead, { Panel } from './ui/StepHead';
 import { usePostedLog } from './usePostedLog';
 
-const APP_VERSION = '2.0.0';
+const APP_VERSION = '2.1.0';
 const today = new Date().toISOString().slice(0, 10);
 
 const commandModes: Array<{ value: CommandMode; label: string }> = [
@@ -145,6 +148,40 @@ function useActiveSection(ids: string[], endId: string) {
 function statusChipClass(status: string) {
   return status === 'READY' ? 'gn-chip gn-chip--ok' : 'gn-chip gn-chip--info';
 }
+
+// ---- read-only signals for the checklist, the sidebar ticks and the status chips ----
+
+/** Template text that means "not filled in yet". */
+const placeholderFacts = new Set(storyTemplates.map((template) => template.keyFacts.trim()));
+const placeholderHeadlines = new Set(storyTemplates.map((template) => template.headline.trim()));
+/** Every feed pre-fills a to-do note ("Check … against a second outlet") — that is not verification yet. */
+const defaultNotes = [...feedSources, ...storyTemplates].map((item) => item.verificationNotes.trim()).filter(Boolean);
+const CARD_HEADLINE_MAX = 9;
+
+function countSources(primary: string, backups: string) {
+  const names = [primary, ...backups.split(/[,;|]/)].map((name) => name.trim().toLowerCase()).filter(Boolean);
+  return new Set(names).size;
+}
+
+/** What the build knows about its optional services (see vite-env.d.ts). */
+const hostedProxy = Boolean(import.meta.env.VITE_TTS_PROXY_URL);
+const webImageSearch = Boolean(import.meta.env.VITE_SERPER_API_KEY || (import.meta.env.VITE_GOOGLE_CSE_KEY && import.meta.env.VITE_GOOGLE_CSE_CX));
+
+/** "26 Nov 2026, 5:47 am" → ["5:47 am", "26 Nov 2026"] for the stat tile. */
+function splitRefresh(value: string): [string, string] {
+  const cut = value.lastIndexOf(', ');
+  return cut > 0 ? [value.slice(cut + 2), value.slice(0, cut).replace(/\s\d{4}$/, '')] : [value, ''];
+}
+
+type OutputKey = 'facebook' | 'x' | 'instagram' | 'whatsapp' | 'video' | 'card';
+const outputTabs: Array<{ key: OutputKey; label: string; title: string; shareable: boolean }> = [
+  { key: 'facebook', label: 'Facebook', title: 'Facebook post', shareable: true },
+  { key: 'x', label: 'X', title: 'X post', shareable: true },
+  { key: 'instagram', label: 'Instagram', title: 'Instagram caption', shareable: true },
+  { key: 'whatsapp', label: 'WhatsApp', title: 'WhatsApp status', shareable: true },
+  { key: 'video', label: 'Video script', title: 'Short video script', shareable: false },
+  { key: 'card', label: 'Card brief', title: 'News card brief', shareable: false },
+];
 
 function CopyButton({ text, label = 'Copy', className = 'gn-btn gn-btn--sm' }: { text: string; label?: string; className?: string }) {
   const [copied, setCopied] = useState(false);
@@ -379,6 +416,93 @@ export default function App() {
     target.scrollIntoView({ behavior: prefersReducedMotion() ? 'auto' : 'smooth', block: 'start' });
   }
 
+  // ---- rail hosts: CardDesigner portals its live preview + card buttons into these ----
+  const [previewHost, setPreviewHost] = useState<HTMLDivElement | null>(null);
+  const [actionsHost, setActionsHost] = useState<HTMLDivElement | null>(null);
+  const [card, setCard] = useState<CardStatus>({ hasPhoto: false, hasCredit: false, headline: '', captions: 0, voice: 'Off' });
+  const [outputTab, setOutputTab] = useState<OutputKey>('facebook');
+
+  // ---- derived, read-only signals ----
+  const storyPicked = draft.isLive || !placeholderHeadlines.has(draft.headline.trim());
+  const sourceCount = countSources(draft.primarySource, draft.backupSources);
+  const keyFactsFilled = draft.keyFacts.trim() !== '' && !placeholderFacts.has(draft.keyFacts.trim());
+  const notes = draft.verificationNotes.trim();
+  const notesWritten = notes !== '' && !defaultNotes.some((note) => notes.startsWith(note));
+  const cardHeadlineWords = wordCount(card.headline);
+  const cardHeadlineOk = cardHeadlineWords > 0 && cardHeadlineWords <= CARD_HEADLINE_MAX && !placeholderHeadlines.has(card.headline.trim());
+  const draftReady = storyPicked && keyFactsFilled && notesWritten && sourceCount >= 2;
+  const storyLogged = isAlreadyPosted(draft, postedLog);
+
+  const checks = [
+    { key: 'story', label: 'Story selected', done: storyPicked, target: 'step-desk', detail: draft.isLive ? draft.primarySource : '' },
+    {
+      key: 'headline',
+      label: `Card headline ≤ ${CARD_HEADLINE_MAX} words`,
+      done: cardHeadlineOk,
+      target: 'step-card',
+      detail: placeholderHeadlines.has(card.headline.trim()) ? 'placeholder' : cardHeadlineWords ? `${cardHeadlineWords} words` : '',
+    },
+    { key: 'sources', label: '2+ sources', done: sourceCount >= 2, target: 'step-draft', detail: `${sourceCount}` },
+    { key: 'facts', label: 'Key facts filled', done: keyFactsFilled, target: 'step-draft', detail: '' },
+    { key: 'notes', label: 'Verification notes written', done: notesWritten, target: 'step-draft', detail: '' },
+    { key: 'photo', label: 'Photo with a credit line', done: card.hasPhoto && card.hasCredit, target: 'step-card', detail: card.hasPhoto && !card.hasCredit ? 'no credit' : '' },
+    { key: 'status', label: 'Status is READY', done: draft.status === 'READY', target: 'step-draft', detail: draft.status === 'READY' ? '' : draft.status.toLowerCase() },
+  ];
+  const checksDone = checks.filter((check) => check.done).length;
+
+  const stepDone: Record<string, boolean> = {
+    'step-desk': storyPicked,
+    'step-draft': draftReady,
+    'step-outputs': draftReady,
+    'step-card': cardHeadlineOk && card.hasPhoto && card.hasCredit,
+    'step-video': card.captions > 0,
+    'step-publish': storyLogged,
+  };
+
+  const feedsLive = liveFeedState.feedCount - liveFeedState.failedFeeds.length;
+  const feedsKnown = liveFeedState.feedCount > 0;
+  const feedsChip = !feedsKnown
+    ? 'gn-chip gn-chip--warn'
+    : feedsLive === liveFeedState.feedCount
+      ? 'gn-chip gn-chip--ok'
+      : feedsLive > 0
+        ? 'gn-chip gn-chip--warn'
+        : 'gn-chip gn-chip--err';
+  const [refreshTime, refreshDay] = splitRefresh(liveFeedState.refreshedAt);
+  const showFeedLine = liveFeedState.loading || Boolean(liveFeedState.error) || (!liveFeedState.loading && liveFeedState.itemCount === 0) || liveFeedState.failedFeeds.length > 0;
+  const modeLabel = commandModes.find((option) => option.value === mode)?.label ?? '';
+
+  const avgReactions = measured.length > 0 ? Math.round(measured.reduce((sum, entry) => sum + (entry.reactions ?? 0), 0) / measured.length) : null;
+
+  const activeOutput = outputTabs.find((tab) => tab.key === outputTab) ?? outputTabs[0];
+  const outputText = outputs[activeOutput.key];
+  const scriptBeats = parseScript(outputs.video).beats;
+  const outputMeta: Record<OutputKey, string> = {
+    facebook: `${outputs.facebook.length} characters`,
+    x: `${outputs.x.length}/280`,
+    instagram: `${(outputs.instagram.match(/#[A-Za-z0-9_]+/g) ?? []).length} hashtags`,
+    whatsapp: `${outputs.whatsapp.split('\n').filter(Boolean).length} lines`,
+    video: `${scriptBeats.length} beats${scriptBeats.length ? ` · ${scriptBeats[scriptBeats.length - 1].time.split('-').pop()}` : ''}`,
+    card: 'For the designer',
+  };
+
+  function renderOutputPreview(key: OutputKey) {
+    switch (key) {
+      case 'facebook':
+        return <FacebookPreview text={outputs.facebook} />;
+      case 'x':
+        return <XPreview text={outputs.x} />;
+      case 'instagram':
+        return <InstagramPreview text={outputs.instagram} />;
+      case 'whatsapp':
+        return <WhatsAppPreview text={outputs.whatsapp} />;
+      case 'video':
+        return <ScriptTimeline text={outputs.video} />;
+      default:
+        return <CardBriefList text={outputs.card} />;
+    }
+  }
+
   return (
     <div className="gn-shell">
       <aside className="gn-sidebar" ref={sidebarRef}>
@@ -388,443 +512,551 @@ export default function App() {
           </span>
           <div>
             <div className="gn-brand__name">GREATERNEWS</div>
-            <div className="gn-brand__sub">Studio</div>
+            <div className="gn-brand__sub">News Studio</div>
           </div>
         </div>
 
         <nav className="gn-nav" aria-label="Workflow steps">
           <div className="gn-nav__label">Workflow</div>
-          {workflowSections.map((section, index) => (
-            <a
-              key={section.id}
-              href={`#${section.id}`}
-              className={activeSection === section.id ? 'is-active' : undefined}
-              aria-current={activeSection === section.id ? 'step' : undefined}
-              onClick={(event) => jumpToSection(event, section.id)}
-            >
-              <span className="gn-nav__num">{index + 1}</span>
-              {section.label}
-            </a>
-          ))}
+          {workflowSections.map((section, index) => {
+            const isActive = activeSection === section.id;
+            const isDone = stepDone[section.id];
+            return (
+              <a
+                key={section.id}
+                href={`#${section.id}`}
+                className={[isActive ? 'is-active' : '', isDone ? 'is-done' : ''].filter(Boolean).join(' ') || undefined}
+                aria-current={isActive ? 'step' : undefined}
+                title={isDone ? `${section.label} — done` : undefined}
+                onClick={(event) => jumpToSection(event, section.id)}
+              >
+                <span className="gn-nav__num">{isDone ? '✓' : index + 1}</span>
+                {section.label}
+              </a>
+            );
+          })}
         </nav>
 
         <div className="gn-sidebar__foot">
-          <div className="app-now">
-            <span className="app-now__label">Working on</span>
-            <strong className="app-now__title">{draft.headline || 'No story selected yet'}</strong>
-            <span className="app-now__meta">
-              <span className={statusChipClass(draft.status)}>{draft.status}</span>
+          <div className="gn-nav__label">Status</div>
+          <div className="app-engines">
+            <span className={feedsChip}>{feedsKnown ? `Feeds · ${feedsLive}/${liveFeedState.feedCount} live` : 'Feeds · loading…'}</span>
+            <span className={hostedProxy ? 'gn-chip gn-chip--ok' : 'gn-chip gn-chip--warn'} title="Drafts video scripts and speaks the voiceover">
+              {hostedProxy ? 'Drafting + voice · hosted' : 'Drafting + voice · local only'}
             </span>
+            <span className={webImageSearch ? 'gn-chip gn-chip--ok' : 'gn-chip'}>{webImageSearch ? 'Image search · web + free' : 'Image search · free sources'}</span>
+            <span className={card.voice === 'Off' ? 'gn-chip' : 'gn-chip gn-chip--info'}>Voice · {card.voice}</span>
           </div>
+          <p className="gn-hint app-version">GreaterNews Studio v{APP_VERSION}</p>
         </div>
       </aside>
 
       <main className="gn-main">
-        <header className="app-topbar">
-          <div className="gn-topbar app-topbar__inner">
-            <div className="gn-topbar__title">
-              <h1 className="app-title">GreaterNews Studio</h1>
-              <p className="gn-sub">News You Can Trust · verified before it posts</p>
-            </div>
-            <div className="gn-actions app-topbar__actions">
-              <span className="gn-chip gn-chip--plain">v{APP_VERSION}</span>
-              <label className="app-date">
-                <span className="gn-label">Date</span>
-                <input className="gn-input" type="date" value={date} onChange={(event) => setDate(event.target.value)} />
-              </label>
-              <CopyButton text={pack} label="Copy pack" className="gn-btn" />
-              <button type="button" className="gn-btn gn-btn--primary" onClick={() => downloadText(`greaternews_${date}.md`, pack)}>
-                Save pack
-              </button>
-            </div>
-          </div>
-        </header>
+        <div className="gn-layout">
+          <div className="gn-col">
+            <section id="step-desk" className="gn-card gn-card--accent app-section app-hero">
+              <StepHead
+                step={1}
+                name="Story desk"
+                hero
+                title="What's today's story?"
+                sub="Pick a lead from today's live feeds, or filter by topic — then verify it in step 2."
+              />
 
-        <div className="gn-container">
-          <section id="step-desk" className="gn-card app-section">
-            <header className="gn-card__head">
-              <div>
-                <span className="gn-eyebrow">Story desk</span>
-                <h2 className="gn-h2">
-                  <span className="gn-step">1</span>Pick today's story
-                </h2>
-              </div>
-              <div className="gn-actions">
-                <button type="button" className="gn-btn gn-btn--sm" onClick={() => void refreshLiveStories()} disabled={liveFeedState.loading}>
-                  {liveFeedState.loading ? <span className="gn-spin" aria-hidden="true" /> : null}
+              <div className="hero-search">
+                <label className="hero-search__field">
+                  <span className="visually-hidden">Filter stories by topic</span>
+                  <input
+                    className="gn-input hero-search__input"
+                    value={topic}
+                    onChange={(event) => setTopic(event.target.value)}
+                    placeholder="Filter by topic — e.g. cedi, Black Stars, South Africa"
+                  />
+                </label>
+                <button type="button" className="gn-btn hero-search__btn" onClick={() => void refreshLiveStories()} disabled={liveFeedState.loading}>
+                  {liveFeedState.loading ? <span className="gn-spin" aria-hidden="true" /> : <span aria-hidden="true">↻</span>}
                   {liveFeedState.loading ? 'Refreshing…' : 'Refresh feeds'}
                 </button>
               </div>
-            </header>
 
-            <div className="desk-controls">
-              <div className="gn-seg app-seg" role="group" aria-label="Command mode">
-                {commandModes.map((option) => (
-                  <button
-                    key={option.value}
-                    type="button"
-                    className={mode === option.value ? 'is-on is-gold' : undefined}
-                    aria-pressed={mode === option.value}
-                    onClick={() => setMode(option.value)}
-                  >
-                    {option.label}
-                  </button>
-                ))}
+              <div className="hero-modes">
+                <span className="gn-small gn-muted">Mode</span>
+                <div className="gn-seg app-seg" role="group" aria-label="Command mode">
+                  {commandModes.map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      className={mode === option.value ? 'is-on is-gold' : undefined}
+                      aria-pressed={mode === option.value}
+                      onClick={() => setMode(option.value)}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
               </div>
-              <input
-                className="gn-input topic-input"
-                value={topic}
-                onChange={(event) => setTopic(event.target.value)}
-                placeholder="Filter by topic — e.g. cedi, Black Stars, South Africa"
-              />
-            </div>
 
-            <p className={`app-status app-status--${liveFeedState.loading ? 'busy' : liveFeedState.error ? 'err' : 'ok'}`}>
-              {liveFeedState.error || liveFeedState.message} {liveFeedState.refreshedAt ? `Last refreshed ${liveFeedState.refreshedAt}.` : ''}{' '}
-              {liveFeedState.failedFeeds.length > 0 ? `Feeds unavailable: ${liveFeedState.failedFeeds.join(', ')}.` : ''}
-            </p>
-
-            <div className="story-grid">
-              {storyMenu.map((story) => (
-                <button
-                  key={story.id}
-                  type="button"
-                  className={draft.id === story.id ? 'gn-item story-card is-selected' : 'gn-item story-card'}
-                  aria-pressed={draft.id === story.id}
-                  onClick={() => setDraft(cloneDraft(story))}
-                >
-                  <span className="story-card-top">
-                    <span className={statusChipClass(story.status)}>{story.status}</span>
-                    <span className="gn-chip gn-chip--plain">{story.category}</span>
-                    {story.isLive ? <span className="gn-chip gn-chip--err">LIVE</span> : null}
-                    {isAlreadyPosted(story, postedLog) ? <span className="gn-chip gn-chip--warn">POSTED</span> : null}
-                  </span>
-                  <strong className="gn-item__title">{story.headline}</strong>
-                  <span className="story-card-note">{story.menuNote}</span>
-                  <span className="gn-item__meta story-card-meta">
-                    <span>{story.primarySource}</span>
-                    {story.publishedAt ? <span>{formatDateTime(story.publishedAt)}</span> : null}
-                  </span>
-                </button>
-              ))}
-            </div>
-          </section>
-
-          <section id="step-draft" className="gn-card app-section">
-            <header className="gn-card__head">
-              <div>
-                <span className="gn-eyebrow">Draft &amp; verify</span>
-                <h2 className="gn-h2">
-                  <span className="gn-step">2</span>Make the story ours
-                </h2>
+              <div className="gn-stats hero-stats">
+                <div className="gn-stat">
+                  <span className="gn-stat__v">{liveFeedState.loading && liveFeedState.itemCount === 0 ? '…' : liveFeedState.itemCount}</span>
+                  <span className="gn-stat__k">Stories loaded</span>
+                </div>
+                <div className="gn-stat">
+                  <span className="gn-stat__v">{feedsKnown ? `${feedsLive}/${liveFeedState.feedCount}` : '…'}</span>
+                  <span className="gn-stat__k">Feeds live</span>
+                </div>
+                <div className="gn-stat">
+                  <span className="gn-stat__v">{refreshTime || '—'}</span>
+                  <span className="gn-stat__k">Refreshed{refreshDay ? ` · ${refreshDay}` : ''}</span>
+                </div>
+                <div className="gn-stat">
+                  <span className="gn-stat__v">{weekEntries.length}</span>
+                  <span className="gn-stat__k">Logged this week</span>
+                </div>
               </div>
-              <div className="gn-actions">
-                <button type="button" className="gn-btn gn-btn--sm" onClick={() => void copyBriefWithContext()} disabled={briefState === 'busy'}>
-                  {briefState === 'busy' ? <span className="gn-spin" aria-hidden="true" /> : null}
-                  {briefState === 'busy' ? 'Fetching article context…' : briefState === 'copied' ? 'Copied ✓' : 'Copy Claude brief'}
-                </button>
-                <button type="button" className="gn-btn gn-btn--sm" onClick={() => void pasteClaudePack()}>
-                  Paste Claude pack
-                </button>
+
+              {showFeedLine ? (
+                <p className={`app-status app-status--${liveFeedState.loading ? 'busy' : liveFeedState.error || liveFeedState.itemCount === 0 ? 'err' : 'warn'}`}>
+                  {liveFeedState.loading || liveFeedState.error || liveFeedState.itemCount === 0 ? `${liveFeedState.error || liveFeedState.message} ` : ''}
+                  {liveFeedState.failedFeeds.length > 0 ? `Feeds unavailable: ${liveFeedState.failedFeeds.join(', ')}.` : ''}
+                </p>
+              ) : null}
+
+              <div className="hero-picks__head">
+                <span className="gn-eyebrow">Today's menu</span>
+                <span className="gn-small gn-muted">
+                  {storyMenu.length} {storyMenu.length === 1 ? 'story' : 'stories'} · {modeLabel}
+                  {topic.trim() ? ` · “${topic.trim()}”` : ''}
+                </span>
+              </div>
+              <div className="story-grid">
+                {storyMenu.map((story, index) => {
+                  const selected = draft.id === story.id;
+                  return (
+                    <article
+                      key={story.id}
+                      className={selected ? 'gn-item story-card is-selected' : 'gn-item story-card'}
+                      onClick={() => setDraft(cloneDraft(story))}
+                    >
+                      <div className="story-card__top">
+                        <span className="story-card__rank">{index + 1}</span>
+                        <h3 className="story-card__title">{story.headline}</h3>
+                      </div>
+                      <p className="gn-item__summary story-card__summary">{story.menuNote}</p>
+                      <div className="story-card__foot">
+                        <div className="gn-item__meta story-card__meta">
+                          <span className="gn-chip gn-chip--plain">{story.category}</span>
+                          {story.status === 'DEVELOPING' ? <span className="gn-chip gn-chip--info">DEVELOPING</span> : null}
+                          {!story.isLive ? <span className="gn-chip gn-chip--violet">Template slot</span> : null}
+                          {isAlreadyPosted(story, postedLog) ? <span className="gn-chip gn-chip--warn">Posted</span> : null}
+                          <span className="story-card__source">
+                            {story.primarySource}
+                            {story.publishedAt ? ` · ${formatDateTime(story.publishedAt)}` : ''}
+                          </span>
+                          {story.link ? (
+                            <a href={story.link} target="_blank" rel="noreferrer" onClick={(event) => event.stopPropagation()}>
+                              open ↗
+                            </a>
+                          ) : null}
+                        </div>
+                        {selected ? (
+                          <span className="gn-chip gn-chip--gold story-card__picked">In draft</span>
+                        ) : (
+                          <button
+                            type="button"
+                            className="gn-btn gn-btn--xs gn-btn--primary"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setDraft(cloneDraft(story));
+                            }}
+                          >
+                            Use
+                          </button>
+                        )}
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            </section>
+
+            <section id="step-draft" className="gn-card app-section">
+              <StepHead step={2} name="Draft & verify" title="Make the story ours" sub="Verify the lead, then shape the facts, sources and angle every format is built from.">
                 <button type="button" className="gn-btn gn-btn--sm gn-btn--ghost" onClick={() => setDraft(cloneDraft(storyTemplates[0]))}>
                   Reset draft
                 </button>
-              </div>
-            </header>
+              </StepHead>
 
-            <p className="app-note">
-              Fast AI drafting: "Copy Claude brief" packages the story with article context → paste into Claude → copy Claude's reply → "Paste Claude pack" fills every field here automatically.
-            </p>
-            {pasteMessage ? <p className="app-note app-note--flash">{pasteMessage}</p> : null}
-
-            <details className="gn-details rules-details">
-              <summary>Editorial guardrails — read before publishing</summary>
-              <div className="gn-details__body">
-                <ul className="rule-list">
-                  <li>Always search the web before writing; never write news from memory.</li>
-                  <li>Use at least 2 independent sources for major or breaking claims.</li>
-                  <li>Attribute every story; never fabricate names, numbers, or quotes.</li>
-                  <li>Quotes under 15 words, one per source, in quotation marks.</li>
-                  <li>Keep tragedy, crime, and politics factual and restrained — no slang, no sides.</li>
-                  <li>Check the posted log so a story never repeats.</li>
-                </ul>
-                <div className="bucket-chips">
-                  {storyBuckets.map((bucket) => (
-                    <span className="gn-chip gn-chip--plain" key={bucket.title} title={bucket.note}>
-                      {bucket.emoji} {bucket.title}
-                    </span>
-                  ))}
+              <div className="ai-flow">
+                <span className="ai-flow__label">Fast AI drafting</span>
+                <div className="ai-flow__steps">
+                  <button type="button" className="gn-btn gn-btn--sm gn-btn--primary" onClick={() => void copyBriefWithContext()} disabled={briefState === 'busy'}>
+                    {briefState === 'busy' ? <span className="gn-spin" aria-hidden="true" /> : null}
+                    {briefState === 'busy' ? 'Fetching article context…' : briefState === 'copied' ? 'Copied ✓' : '1 · Copy Claude brief'}
+                  </button>
+                  <span className="ai-flow__arrow" aria-hidden="true">→</span>
+                  <span className="ai-flow__step">2 · Paste into Claude, copy its reply</span>
+                  <span className="ai-flow__arrow" aria-hidden="true">→</span>
+                  <button type="button" className="gn-btn gn-btn--sm" onClick={() => void pasteClaudePack()}>
+                    3 · Paste Claude pack
+                  </button>
                 </div>
+                <p className="gn-hint ai-flow__hint">The brief packages the story with article context; the pack fills every field below automatically.</p>
               </div>
-            </details>
+              {pasteMessage ? <p className="app-note app-note--flash">{pasteMessage}</p> : null}
 
-            <div className="editor-grid">
-              <label className="gn-field span-full">
-                <span className="gn-label">Headline</span>
-                <input className="gn-input" value={draft.headline} onChange={(event) => updateDraft('headline', event.target.value)} />
-                {headlineWords > 9 ? (
-                  <em className="field-hint">ℹ {headlineWords} words — fine for posts; the card headline rule is max 9, so shorten it in the Card Studio.</em>
-                ) : null}
-              </label>
-
-              <label className="gn-field">
-                <span className="gn-label">Category</span>
-                <select className="gn-select" value={draft.category} onChange={(event) => updateDraft('category', event.target.value as StoryCategory)}>
-                  {storyBuckets.map((bucket) => (
-                    <option key={bucket.title} value={bucket.title}>
-                      {bucket.title}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <label className="gn-field">
-                <span className="gn-label">Status</span>
-                <select className="gn-select" value={draft.status} onChange={(event) => updateDraft('status', event.target.value as StoryStatus)}>
-                  <option value="READY">READY</option>
-                  <option value="DEVELOPING">DEVELOPING</option>
-                </select>
-              </label>
-
-              <label className="gn-field">
-                <span className="gn-label">Primary source</span>
-                <input className="gn-input" value={draft.primarySource} onChange={(event) => updateDraft('primarySource', event.target.value)} />
-              </label>
-
-              <label className="gn-field">
-                <span className="gn-label">Backup sources</span>
-                <input className="gn-input" value={draft.backupSources} onChange={(event) => updateDraft('backupSources', event.target.value)} />
-              </label>
-
-              <label className="gn-field span-full">
-                <span className="gn-label">Key facts (verified only)</span>
-                <textarea className="gn-textarea" value={draft.keyFacts} onChange={(event) => updateDraft('keyFacts', event.target.value)} rows={4} />
-              </label>
-
-              <label className="gn-field">
-                <span className="gn-label">Verification notes</span>
-                <textarea className="gn-textarea" value={draft.verificationNotes} onChange={(event) => updateDraft('verificationNotes', event.target.value)} rows={3} />
-              </label>
-
-              <label className="gn-field">
-                <span className="gn-label">Our angle</span>
-                <textarea className="gn-textarea" value={draft.angle} onChange={(event) => updateDraft('angle', event.target.value)} rows={3} />
-                <span className="bucket-chips angle-chips">
-                  {angleIdeas[draft.category].map((idea) => (
-                    <button key={idea} type="button" className="gn-chip gn-chip--plain app-chip-btn" onClick={() => updateDraft('angle', idea)}>
-                      {idea.split(' ').slice(0, 5).join(' ')}…
-                    </button>
-                  ))}
-                </span>
-              </label>
-
-              <label className="gn-field">
-                <span className="gn-label">
-                  Short quote <span className="gn-hint">(under 15 words)</span>
-                </span>
-                <input className="gn-input" value={draft.quote} onChange={(event) => updateDraft('quote', event.target.value)} />
-                {quoteWords > 15 ? (
-                  <em className="field-hint warn">⚠ {quoteWords} words — house rule: direct quotes stay under 15. Trim it or paraphrase with attribution.</em>
-                ) : null}
-              </label>
-
-              <label className="gn-field">
-                <span className="gn-label">Engagement question</span>
-                <input className="gn-input" value={draft.cta} onChange={(event) => updateDraft('cta', event.target.value)} />
-              </label>
-
-              <label className="gn-field">
-                <span className="gn-label">Image suggestion</span>
-                <input className="gn-input" value={draft.imageSuggestion} onChange={(event) => updateDraft('imageSuggestion', event.target.value)} />
-              </label>
-
-              <label className="gn-field">
-                <span className="gn-label">Sources searched today</span>
-                <input className="gn-input" value={draft.sourcesSearched} onChange={(event) => updateDraft('sourcesSearched', event.target.value)} />
-              </label>
-            </div>
-          </section>
-
-          <section id="step-outputs" className="gn-card app-section">
-            <header className="gn-card__head">
-              <div>
-                <span className="gn-eyebrow">Outputs</span>
-                <h2 className="gn-h2">
-                  <span className="gn-step">3</span>Every format, ready to post
-                </h2>
-              </div>
-            </header>
-
-            <div className="content-grid">
-              <article className="output-card">
-                <div className="output-heading">
-                  <h3 className="gn-h3">Facebook</h3>
-                  <span className="output-actions">
-                    <ShareButton text={outputs.facebook} title={draft.headline} />
-                    <CopyButton text={outputs.facebook} />
-                  </span>
-                </div>
-                <pre>{outputs.facebook}</pre>
-              </article>
-
-              <article className="output-card">
-                <div className="output-heading">
-                  <h3 className="gn-h3">X</h3>
-                  <div className="output-actions">
-                    <span className={outputs.x.length > 280 ? 'gn-chip gn-chip--err' : 'gn-chip gn-chip--ok'}>{outputs.x.length}/280</span>
-                    <ShareButton text={outputs.x} title={draft.headline} />
-                    <CopyButton text={outputs.x} />
+              <details className="gn-details rules-details">
+                <summary>Editorial guardrails — read before publishing</summary>
+                <div className="gn-details__body">
+                  <ul className="rule-list">
+                    <li>Always search the web before writing; never write news from memory.</li>
+                    <li>Use at least 2 independent sources for major or breaking claims.</li>
+                    <li>Attribute every story; never fabricate names, numbers, or quotes.</li>
+                    <li>Quotes under 15 words, one per source, in quotation marks.</li>
+                    <li>Keep tragedy, crime, and politics factual and restrained — no slang, no sides.</li>
+                    <li>Check the posted log so a story never repeats.</li>
+                  </ul>
+                  <div className="bucket-chips">
+                    {storyBuckets.map((bucket) => (
+                      <span className="gn-chip gn-chip--plain" key={bucket.title} title={bucket.note}>
+                        {bucket.emoji} {bucket.title}
+                      </span>
+                    ))}
                   </div>
                 </div>
-                <pre>{outputs.x}</pre>
-              </article>
+              </details>
 
-              <article className="output-card">
-                <div className="output-heading">
-                  <h3 className="gn-h3">Instagram</h3>
-                  <span className="output-actions">
-                    <ShareButton text={outputs.instagram} title={draft.headline} />
-                    <CopyButton text={outputs.instagram} />
-                  </span>
-                </div>
-                <pre>{outputs.instagram}</pre>
-              </article>
+              <div className="draft-panels">
+                <Panel
+                  icon="story"
+                  title="The story"
+                  className="draft-panel--wide"
+                  aside={<span className={headlineWords > CARD_HEADLINE_MAX ? 'gn-chip gn-chip--warn' : 'gn-chip gn-chip--plain'}>{headlineWords} words</span>}
+                >
+                  <label className="gn-field">
+                    <span className="gn-label">Headline</span>
+                    <input className="gn-input" value={draft.headline} onChange={(event) => updateDraft('headline', event.target.value)} />
+                    {headlineWords > 9 ? (
+                      <em className="field-hint">ℹ {headlineWords} words — fine for posts; the card headline rule is max 9, so shorten it in the Card Studio.</em>
+                    ) : null}
+                  </label>
+                  <div className="field-grid">
+                    <label className="gn-field">
+                      <span className="gn-label">Category</span>
+                      <select className="gn-select" value={draft.category} onChange={(event) => updateDraft('category', event.target.value as StoryCategory)}>
+                        {storyBuckets.map((bucket) => (
+                          <option key={bucket.title} value={bucket.title}>
+                            {bucket.title}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <div className="gn-field">
+                      <span className="gn-label">Status</span>
+                      <div className="gn-seg status-seg" role="group" aria-label="Story status">
+                        {(['READY', 'DEVELOPING'] as const).map((status) => (
+                          <button
+                            key={status}
+                            type="button"
+                            className={draft.status === status ? `is-on status-seg--${status.toLowerCase()}` : undefined}
+                            aria-pressed={draft.status === status}
+                            onClick={() => updateDraft('status', status)}
+                          >
+                            {status}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </Panel>
 
-              <article className="output-card">
-                <div className="output-heading">
-                  <h3 className="gn-h3">WhatsApp</h3>
-                  <span className="output-actions">
-                    <ShareButton text={outputs.whatsapp} title={draft.headline} />
-                    <CopyButton text={outputs.whatsapp} />
-                  </span>
-                </div>
-                <pre>{outputs.whatsapp}</pre>
-              </article>
+                <Panel
+                  icon="sources"
+                  title="Sources"
+                  aside={<span className={sourceCount >= 2 ? 'gn-chip gn-chip--ok' : 'gn-chip gn-chip--warn'}>{sourceCount} {sourceCount === 1 ? 'source' : 'sources'}</span>}
+                >
+                  <label className="gn-field">
+                    <span className="gn-label">Primary source</span>
+                    <input className="gn-input" value={draft.primarySource} onChange={(event) => updateDraft('primarySource', event.target.value)} />
+                  </label>
+                  <label className="gn-field">
+                    <span className="gn-label">
+                      Backup sources <span className="gn-hint">(comma-separated)</span>
+                    </span>
+                    <input className="gn-input" value={draft.backupSources} onChange={(event) => updateDraft('backupSources', event.target.value)} />
+                  </label>
+                  <label className="gn-field">
+                    <span className="gn-label">Sources searched today</span>
+                    <input className="gn-input" value={draft.sourcesSearched} onChange={(event) => updateDraft('sourcesSearched', event.target.value)} />
+                  </label>
+                </Panel>
 
-              <article className="output-card">
-                <div className="output-heading">
-                  <h3 className="gn-h3">Video script</h3>
-                  <CopyButton text={outputs.video} />
-                </div>
-                <pre>{outputs.video}</pre>
-              </article>
+                <Panel
+                  icon="verified"
+                  title="Verified facts & notes"
+                  aside={<span className={notesWritten ? 'gn-chip gn-chip--ok' : 'gn-chip gn-chip--warn'}>{notesWritten ? 'Notes written' : 'Needs notes'}</span>}
+                >
+                  <label className="gn-field">
+                    <span className="gn-label">Key facts (verified only)</span>
+                    <textarea className="gn-textarea" value={draft.keyFacts} onChange={(event) => updateDraft('keyFacts', event.target.value)} rows={4} />
+                  </label>
+                  <label className="gn-field">
+                    <span className="gn-label">
+                      Verification notes <span className="gn-hint">(what you checked, against what)</span>
+                    </span>
+                    <textarea className="gn-textarea" value={draft.verificationNotes} onChange={(event) => updateDraft('verificationNotes', event.target.value)} rows={3} />
+                  </label>
+                </Panel>
 
-              <article className="output-card">
-                <div className="output-heading">
-                  <h3 className="gn-h3">News card brief</h3>
-                  <CopyButton text={outputs.card} />
-                </div>
-                <pre>{outputs.card}</pre>
-              </article>
-            </div>
-          </section>
-
-          <CardDesigner
-            suggestedHeadline={draft.headline}
-            suggestedSubline={clampText(draft.keyFacts, 120)}
-            suggestedSource={draft.primarySource}
-            suggestedCategory={draft.category}
-            suggestedLink={draft.link ?? ''}
-            weeklyHeadlines={weeklyHeadlines}
-            weeklyRange={weeklyRange}
-          />
-
-          <section id="step-publish" className="gn-card app-section">
-            <header className="gn-card__head">
-              <div>
-                <span className="gn-eyebrow">Publish &amp; track</span>
-                <h2 className="gn-h2">
-                  <span className="gn-step">6</span>Posted log
-                </h2>
+                <Panel
+                  icon="angle"
+                  title="Angle & engagement"
+                  className="draft-panel--wide"
+                  aside={draft.quote.trim() ? <span className={quoteWords > 15 ? 'gn-chip gn-chip--err' : 'gn-chip gn-chip--plain'}>quote {quoteWords}/15 words</span> : null}
+                >
+                  <div className="angle-grid">
+                  <label className="gn-field">
+                    <span className="gn-label">Our angle</span>
+                    <textarea className="gn-textarea" value={draft.angle} onChange={(event) => updateDraft('angle', event.target.value)} rows={4} />
+                    <span className="bucket-chips angle-chips">
+                      {angleIdeas[draft.category].map((idea) => (
+                        <button key={idea} type="button" className="gn-chip gn-chip--plain gn-chip--btn" onClick={() => updateDraft('angle', idea)}>
+                          {idea.split(' ').slice(0, 5).join(' ')}…
+                        </button>
+                      ))}
+                    </span>
+                  </label>
+                  <label className="gn-field">
+                    <span className="gn-label">
+                      Short quote <span className="gn-hint">(under 15 words)</span>
+                    </span>
+                    <input className="gn-input" value={draft.quote} onChange={(event) => updateDraft('quote', event.target.value)} />
+                    {quoteWords > 15 ? (
+                      <em className="field-hint warn">⚠ {quoteWords} words — house rule: direct quotes stay under 15. Trim it or paraphrase with attribution.</em>
+                    ) : null}
+                  </label>
+                  <label className="gn-field">
+                    <span className="gn-label">Engagement question</span>
+                    <input className="gn-input" value={draft.cta} onChange={(event) => updateDraft('cta', event.target.value)} />
+                  </label>
+                  <label className="gn-field">
+                    <span className="gn-label">Image suggestion</span>
+                    <input className="gn-input" value={draft.imageSuggestion} onChange={(event) => updateDraft('imageSuggestion', event.target.value)} />
+                  </label>
+                  </div>
+                </Panel>
               </div>
-              <div className="gn-actions">
-                <button type="button" className="gn-btn gn-btn--sm" onClick={() => downloadText('posted_log.md', buildPostedLogFile(postedLog))}>
-                  Export log
-                </button>
-                <button type="button" className="gn-btn gn-btn--sm" onClick={backupLog}>
-                  Backup (JSON)
-                </button>
-                <label className="gn-btn gn-btn--sm file-button">
-                  Import backup
-                  <input type="file" accept=".json,application/json" hidden onChange={(event) => handleImportFile(event.target.files)} />
-                </label>
-                <button type="button" className="gn-btn gn-btn--sm gn-btn--danger" onClick={clearLog}>
-                  Clear log
-                </button>
-                <button type="button" className="gn-btn gn-btn--sm gn-btn--primary" onClick={() => logStory(draft, date)}>
+            </section>
+
+            <section id="step-outputs" className="gn-card app-section">
+              <StepHead step={3} name="Outputs" title="Every format, ready to post" sub="Generated from your draft — preview how each platform will read it, then copy." />
+
+              <div className="gn-seg out-tabs" role="tablist" aria-label="Output format">
+                {outputTabs.map((tab) => (
+                  <button
+                    key={tab.key}
+                    type="button"
+                    role="tab"
+                    aria-selected={outputTab === tab.key}
+                    className={outputTab === tab.key ? 'is-on' : undefined}
+                    onClick={() => setOutputTab(tab.key)}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+
+              <div className="out-stage" role="tabpanel" aria-label={activeOutput.title}>
+                <div className="out-stage__bar">
+                  <div className="out-stage__title">
+                    <h3 className="gn-h3">{activeOutput.title}</h3>
+                    <span className={activeOutput.key === 'x' && outputs.x.length > 280 ? 'gn-chip gn-chip--err' : 'gn-chip gn-chip--plain'}>{outputMeta[activeOutput.key]}</span>
+                  </div>
+                  <div className="gn-actions">
+                    {activeOutput.shareable ? <ShareButton text={outputText} title={draft.headline} /> : null}
+                    <CopyButton key={activeOutput.key} text={outputText} className="gn-btn gn-btn--sm gn-btn--primary" />
+                  </div>
+                </div>
+                <div className="out-stage__view">{renderOutputPreview(activeOutput.key)}</div>
+              </div>
+            </section>
+
+            <CardDesigner
+              suggestedHeadline={draft.headline}
+              suggestedSubline={clampText(draft.keyFacts, 120)}
+              suggestedSource={draft.primarySource}
+              suggestedCategory={draft.category}
+              suggestedLink={draft.link ?? ''}
+              weeklyHeadlines={weeklyHeadlines}
+              weeklyRange={weeklyRange}
+              previewHost={previewHost}
+              actionsHost={actionsHost}
+              onStatusChange={setCard}
+            />
+
+            <section id="step-publish" className="gn-card app-section">
+              <StepHead step={6} name="Publish & track" title="Posted log" sub="Log each story after it goes out so nothing repeats — then add reach and reactions.">
+                <button type="button" className="gn-btn gn-btn--primary" onClick={() => logStory(draft, date)}>
                   Log current story
                 </button>
-              </div>
-            </header>
+              </StepHead>
 
-            {importMessage ? <p className="app-note app-note--flash">{importMessage}</p> : null}
-            {insight ? (
-              <div className="app-callout app-callout--ok">
-                <strong>Audience insight</strong>
-                <p>{insight}</p>
-              </div>
-            ) : (
-              <p className="app-note">
-                Tip: after each post has been up for a day, fill in reach / reactions / shares below — once 3+ posts have numbers, the studio shows which categories grow the page.
-              </p>
-            )}
-
-            {followUps.length > 0 ? (
-              <div className="app-callout app-callout--gold">
-                <strong>Awaiting follow-up ({followUps.length})</strong>
-                <p>These logged stories are still DEVELOPING — check for new facts, post an Update card, then mark them done.</p>
-                <div className="followup-list">
-                  {followUps.map((entry) => (
-                    <div className="gn-item followup-item" key={entry.id}>
-                      <div>
-                        <strong className="gn-item__title">{entry.title}</strong>
-                        <p className="gn-item__meta">
-                          {entry.date} · {entry.source}
-                        </p>
-                      </div>
-                      <button type="button" className="gn-btn gn-btn--sm" onClick={() => markFollowedUp(entry.id)}>
-                        Mark updated
-                      </button>
-                    </div>
-                  ))}
+              <div className="gn-stats publish-stats">
+                <div className="gn-stat">
+                  <span className="gn-stat__v">{postedLog.length}</span>
+                  <span className="gn-stat__k">Logged</span>
+                </div>
+                <div className="gn-stat">
+                  <span className="gn-stat__v">{weekEntries.length}</span>
+                  <span className="gn-stat__k">This week</span>
+                </div>
+                <div className="gn-stat">
+                  <span className="gn-stat__v">{followUps.length}</span>
+                  <span className="gn-stat__k">Awaiting follow-up</span>
+                </div>
+                <div className="gn-stat">
+                  <span className="gn-stat__v">{avgReactions ?? '—'}</span>
+                  <span className="gn-stat__k">Avg reactions</span>
                 </div>
               </div>
-            ) : null}
 
-            <div className="log-list">
-              {postedLog.length > 0 ? (
-                postedLog.map((entry) => (
-                  <div className="gn-item log-item" key={entry.id}>
-                    <strong className="gn-item__title">{entry.title}</strong>
-                    <p className="gn-item__meta">
-                      <span>{entry.date}</span>
-                      <span>{entry.category}</span>
-                      <span>{entry.source}</span>
-                      <span className={statusChipClass(entry.status)}>{entry.status}</span>
-                      {entry.loggedAt ? <span>{formatDateTime(entry.loggedAt)}</span> : null}
-                    </p>
-                    <div className="log-metrics">
-                      {(['reach', 'reactions', 'shares'] as const).map((field) => (
-                        <label key={field} className="gn-field metric-input">
-                          <span className="gn-label">{field}</span>
-                          <input
-                            className="gn-input"
-                            type="number"
-                            min={0}
-                            placeholder="—"
-                            value={entry[field] ?? ''}
-                            onChange={(event) => updateEngagement(entry.id, field, event.target.value)}
-                          />
-                        </label>
-                      ))}
-                    </div>
-                  </div>
-                ))
+              <div className="log-tools">
+                <span className="log-tools__label">Log file</span>
+                <div className="gn-actions">
+                  <button type="button" className="gn-btn gn-btn--sm" onClick={() => downloadText('posted_log.md', buildPostedLogFile(postedLog))}>
+                    Export log
+                  </button>
+                  <button type="button" className="gn-btn gn-btn--sm" onClick={backupLog}>
+                    Backup (JSON)
+                  </button>
+                  <label className="gn-btn gn-btn--sm file-button">
+                    Import backup
+                    <input type="file" accept=".json,application/json" hidden onChange={(event) => handleImportFile(event.target.files)} />
+                  </label>
+                  <button type="button" className="gn-btn gn-btn--sm gn-btn--danger" onClick={clearLog}>
+                    Clear log
+                  </button>
+                </div>
+              </div>
+              {importMessage ? <p className="app-note app-note--flash">{importMessage}</p> : null}
+              {insight ? (
+                <div className="app-callout app-callout--ok">
+                  <strong>Audience insight</strong>
+                  <p>{insight}</p>
+                </div>
               ) : (
-                <p className="gn-empty">No stories logged yet. Log each story after it goes out so nothing repeats.</p>
+                <p className="app-note">
+                  Tip: after each post has been up for a day, fill in reach / reactions / shares below — once 3+ posts have numbers, the studio shows which categories grow the page.
+                </p>
               )}
-            </div>
-          </section>
+
+              {followUps.length > 0 ? (
+                <div className="app-callout app-callout--gold">
+                  <strong>Awaiting follow-up ({followUps.length})</strong>
+                  <p>These logged stories are still DEVELOPING — check for new facts, post an Update card, then mark them done.</p>
+                  <div className="followup-list">
+                    {followUps.map((entry) => (
+                      <div className="gn-item followup-item" key={entry.id}>
+                        <div>
+                          <strong className="gn-item__title">{entry.title}</strong>
+                          <p className="gn-item__meta">
+                            {entry.date} · {entry.source}
+                          </p>
+                        </div>
+                        <button type="button" className="gn-btn gn-btn--sm" onClick={() => markFollowedUp(entry.id)}>
+                          Mark updated
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+
+              <div className="log-list">
+                {postedLog.length > 0 ? (
+                  postedLog.map((entry) => (
+                    <div className="gn-item log-item" key={entry.id}>
+                      <strong className="gn-item__title">{entry.title}</strong>
+                      <p className="gn-item__meta">
+                        <span>{entry.date}</span>
+                        <span>{entry.category}</span>
+                        <span>{entry.source}</span>
+                        <span className={statusChipClass(entry.status)}>{entry.status}</span>
+                        {entry.loggedAt ? <span>{formatDateTime(entry.loggedAt)}</span> : null}
+                      </p>
+                      <div className="log-metrics">
+                        {(['reach', 'reactions', 'shares'] as const).map((field) => (
+                          <label key={field} className="gn-field metric-input">
+                            <span className="gn-label">{field}</span>
+                            <input
+                              className="gn-input"
+                              type="number"
+                              min={0}
+                              placeholder="—"
+                              value={entry[field] ?? ''}
+                              onChange={(event) => updateEngagement(entry.id, field, event.target.value)}
+                            />
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <p className="gn-empty">No stories logged yet. Log each story after it goes out so nothing repeats.</p>
+                )}
+              </div>
+            </section>
+          </div>
+
+          <aside className="gn-rail app-rail" aria-label="Preview and publish">
+            <section className="gn-card rail-card rail-preview" aria-label="Live card preview">
+              <div ref={setPreviewHost} className="rail-preview__host" />
+            </section>
+
+            <section className="gn-card rail-card" aria-label="Publish pack">
+              <div className="rail-card__head">
+                <span className="gn-eyebrow">Publish pack</span>
+                <label className="app-date">
+                  <span className="visually-hidden">Pack date</span>
+                  <input className="gn-input" type="date" value={date} onChange={(event) => setDate(event.target.value)} />
+                </label>
+              </div>
+              <div className="rail-actions">
+                <button type="button" className="gn-btn gn-btn--primary" onClick={() => downloadText(`greaternews_${date}.md`, pack)}>
+                  Save pack
+                </button>
+                <CopyButton text={pack} label="Copy pack" className="gn-btn" />
+                <div ref={setActionsHost} className="rail-actions__slot" />
+              </div>
+              <p className="gn-hint rail-card__hint" title={`Saves greaternews_${date}.md`}>One .md file: the menu, the story and every format.</p>
+            </section>
+
+            <section className="gn-card rail-card" aria-label="Ready to publish checklist">
+              <div className="rail-card__head">
+                <span className="gn-eyebrow">Ready to publish</span>
+                <span className={checksDone === checks.length ? 'rail-score is-complete' : 'rail-score'}>
+                  {checksDone}/{checks.length}
+                </span>
+              </div>
+              <div className={checksDone === checks.length ? 'gn-progress is-complete' : 'gn-progress'} aria-hidden="true">
+                <span style={{ width: `${(checksDone / checks.length) * 100}%` }} />
+              </div>
+              <ul className="gn-checklist">
+                {checks.map((check) => (
+                  <li key={check.key}>
+                    <a href={`#${check.target}`} className={check.done ? 'gn-check is-done' : 'gn-check'} onClick={(event) => jumpToSection(event, check.target)}>
+                      <span className="gn-check__box" aria-hidden="true" />
+                      <span>
+                        {check.label}
+                        <span className="visually-hidden">{check.done ? ' — done' : ' — to do'}</span>
+                      </span>
+                      {check.detail ? <span className="gn-check__detail">{check.detail}</span> : null}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          </aside>
         </div>
         <div id="gn-page-end" className="app-page-end" aria-hidden="true" />
       </main>

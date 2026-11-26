@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { CardFormat, CardTemplate, ChipLabel } from './cardEngine';
 import { drawCard, formatSizes, templateMeta } from './cardEngine';
 import type { ImageResult, SearchPlan } from './imageSearch';
@@ -10,6 +11,21 @@ import { exportCardVideo, videoExportSupported } from './videoExport';
 import { SOUND_LABELS, scheduleBed } from './videoAudio';
 import { isTrackId, loadMusicTracks, musicUrlFor } from './music';
 import type { MusicTrack } from './music';
+import { clipLabel, loadClipVideo, searchCommonsVideos } from './newsClips';
+import type { ClipResult } from './newsClips';
+import { isBeatClip } from './videoScenes';
+import type { BeatMedia } from './videoScenes';
+import StepHead, { Panel } from './ui/StepHead';
+import { RAIL_QUERY, useMediaQuery } from './ui/useMediaQuery';
+
+/** Read-only facts the page shows in its checklist, sidebar ticks and status chips. */
+export type CardStatus = {
+  hasPhoto: boolean;
+  hasCredit: boolean;
+  headline: string;
+  captions: number;
+  voice: string;
+};
 
 type CardDesignerProps = {
   suggestedHeadline: string;
@@ -19,7 +35,34 @@ type CardDesignerProps = {
   suggestedLink: string;
   weeklyHeadlines: string[];
   weeklyRange: string;
+  /** Where the live preview lives on wide screens (the page's right rail). Below that width it sits in step 4. */
+  previewHost?: HTMLElement | null;
+  /** Slot in the rail's action card for Download PNG / Export video. */
+  actionsHost?: HTMLElement | null;
+  onStatusChange?: (status: CardStatus) => void;
 };
+
+const formatOrder: Array<{ key: CardFormat; label: string }> = [
+  { key: 'portrait', label: '4:5' },
+  { key: 'story', label: '9:16' },
+  { key: 'square', label: '1:1' },
+];
+
+function mediaSrc(media: BeatMedia | undefined) {
+  return media && !isBeatClip(media) ? media.src : '';
+}
+
+function formatDuration(seconds: number) {
+  const whole = Math.max(0, Math.round(seconds));
+  return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, '0')}`;
+}
+
+function voiceLabel(voice: VideoVoice, groqName: string) {
+  if (voice === 'groq') return `Groq · ${groqName}`;
+  if (voice === 'elevenlabs') return 'ElevenLabs';
+  if (voice === 'google') return 'Google';
+  return 'Off';
+}
 
 const templateOrder: CardTemplate[] = ['headline', 'quote', 'update', 'stat', 'recap', 'post'];
 const chipOrder: ChipLabel[] = ['UPDATE', 'DEVELOPING', 'BREAKING'];
@@ -60,6 +103,9 @@ export default function CardDesigner({
   suggestedLink,
   weeklyHeadlines,
   weeklyRange,
+  previewHost = null,
+  actionsHost = null,
+  onStatusChange,
 }: CardDesignerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const photoUrlRef = useRef<string>('');
@@ -89,7 +135,8 @@ export default function CardDesigner({
   const [videoNarration, setVideoNarration] = useState('');
   // Per-beat photo subjects the drafter suggests + the loaded image for each beat.
   const [videoImageQueries, setVideoImageQueries] = useState<string[]>([]);
-  const [beatImages, setBeatImages] = useState<(HTMLImageElement | null)[]>([]);
+  // Per beat: a photo, a real news clip (BeatClip), or nothing.
+  const [beatImages, setBeatImages] = useState<BeatMedia[]>([]);
   const [fetchingBeatImages, setFetchingBeatImages] = useState(false);
   const [beatOptions, setBeatOptions] = useState<Record<number, ImageResult[]>>({});
   const [beatOptionsOpen, setBeatOptionsOpen] = useState<number | null>(null);
@@ -118,6 +165,45 @@ export default function CardDesigner({
   // Where a clicked main-search result goes: the card's main photo, or a specific beat (clip) index.
   const [searchTarget, setSearchTarget] = useState<'main' | number>('main');
   const [plan, setPlan] = useState<SearchPlan | null>(null);
+  const [safeZones, setSafeZones] = useState(false);
+  // Media search mode: licensed photos, or real news footage from Wikimedia Commons (beats only).
+  const [mediaMode, setMediaMode] = useState<'photos' | 'clips'>('photos');
+  const [clipResults, setClipResults] = useState<ClipResult[]>([]);
+  const [clipSearching, setClipSearching] = useState(false);
+  const [clipSearched, setClipSearched] = useState(false);
+  const [clipError, setClipError] = useState('');
+  const [loadingClip, setLoadingClip] = useState('');
+  // Display-only metadata (poster, credit) for clips the editor picked, keyed by their <video>.
+  const clipMetaRef = useRef(new WeakMap<HTMLVideoElement, ClipResult>());
+
+  // The live preview renders into a node this component owns, so the <canvas> is never remounted;
+  // the node is moved between the page's right rail (wide screens) and step 4 (narrow screens).
+  const [previewNode] = useState(() => {
+    const node = document.createElement('div');
+    node.className = 'card-preview';
+    return node;
+  });
+  const stepPreviewRef = useRef<HTMLDivElement>(null);
+  const wide = useMediaQuery(RAIL_QUERY);
+
+  useLayoutEffect(() => {
+    const target = wide && previewHost ? previewHost : stepPreviewRef.current;
+    if (target && previewNode.parentElement !== target) {
+      target.appendChild(previewNode);
+    }
+  }, [previewHost, previewNode, wide]);
+
+  useEffect(() => () => previewNode.remove(), [previewNode]);
+
+  useEffect(() => {
+    onStatusChange?.({
+      hasPhoto: photo !== null,
+      hasCredit: footer.trim() !== '',
+      headline,
+      captions: videoBeats.split('\n').filter((line) => line.trim()).length,
+      voice: voiceLabel(videoVoice, groqVoiceName),
+    });
+  }, [footer, groqVoiceName, headline, onStatusChange, photo, videoBeats, videoVoice]);
 
   useEffect(() => {
     void loadMusicTracks().then(setMusicTracks);
@@ -498,11 +584,72 @@ export default function CardDesigner({
           return best?.image ?? null;
         }),
       );
-      setBeatImages(images);
+      // Keep any real news clip the editor picked; auto-fill only supplies photos.
+      setBeatImages((prev) => images.map((image, index) => (isBeatClip(prev[index]) ? prev[index] : image)));
     } catch {
       // Leave existing images in place on failure.
     }
     setFetchingBeatImages(false);
+  }
+
+  // ---- real news clips (Wikimedia Commons, free to reuse) — for video beats only ----
+
+  function switchMediaMode(next: 'photos' | 'clips') {
+    setMediaMode(next);
+    // Clips play under a caption's beat, never as the card photo.
+    if (next === 'clips' && searchTarget === 'main' && captionLines().length > 0) {
+      setSearchTarget(0);
+    }
+  }
+
+  async function runClipSearch() {
+    const trimmed = query.trim();
+    if (!trimmed || clipSearching) {
+      return;
+    }
+    setClipSearching(true);
+    setClipError('');
+    setClipResults([]);
+    try {
+      setClipResults(await searchCommonsVideos(trimmed));
+    } catch {
+      setClipError('Wikimedia Commons is unreachable right now. Check the connection and try again.');
+    }
+    setClipSearched(true);
+    setClipSearching(false);
+  }
+
+  async function useClipResult(result: ClipResult) {
+    if (typeof searchTarget !== 'number' || loadingClip) {
+      return;
+    }
+    const index = searchTarget;
+    setLoadingClip(result.src);
+    setClipError('');
+    try {
+      const video = await loadClipVideo(result.src);
+      const length = Number.isFinite(video.duration) ? video.duration : result.durationS;
+      const start = length > 8 ? Math.min(Math.max(2, length * 0.12), length - 6) : 0; // skip opening slates (same rule as findBestClip)
+      clipMetaRef.current.set(video, result);
+      setBeatImages((prev) => {
+        const next = prev.slice();
+        while (next.length <= index) next.push(null);
+        next[index] = { video, label: clipLabel(result), start };
+        return next;
+      });
+    } catch {
+      setClipError('That clip would not load (it may be too large or blocked). Try another one, or use a photo for this beat.');
+    } finally {
+      setLoadingClip('');
+    }
+  }
+
+  function clearBeatMedia(index: number) {
+    setBeatImages((prev) => {
+      const next = prev.slice();
+      if (index < next.length) next[index] = null;
+      return next;
+    });
   }
 
   function stopSoundPreview() {
@@ -612,18 +759,68 @@ export default function CardDesigner({
     }, 'image/png');
   }
 
+  const captions = captionLines();
+  const beatsWithMedia = captions.filter((_, index) => beatImages[index]).length;
+  const clipCount = captions.filter((_, index) => isBeatClip(beatImages[index])).length;
+  const narrationLines = videoNarration.split('\n').filter((line) => line.trim()).length;
+  const isStory = format === 'story';
+  const canExportVideo = videoExportSupported();
+  const size = formatSizes[format];
+
+  const preview = (
+    <>
+      <div className="card-preview__head">
+        <div className="gn-seg card-preview__formats" role="group" aria-label="Card format">
+          {formatOrder.map((option) => (
+            <button
+              key={option.key}
+              type="button"
+              className={format === option.key ? 'is-on is-gold' : undefined}
+              aria-pressed={format === option.key}
+              title={formatSizes[option.key].label}
+              onClick={() => setFormat(option.key)}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+        <button
+          type="button"
+          className={safeZones && isStory ? 'gn-btn gn-btn--xs gn-btn--ghost is-on' : 'gn-btn gn-btn--xs gn-btn--ghost'}
+          aria-pressed={safeZones && isStory}
+          disabled={!isStory}
+          onClick={() => setSafeZones((on) => !on)}
+          title={isStory ? 'Show the areas the Reels / Status interface covers' : 'Safe zones apply to the 9:16 format'}
+        >
+          Safe zones
+        </button>
+      </div>
+      <div className={isStory ? 'gn-phone card-device' : `card-frame card-device card-device--${format}`}>
+        <div className={isStory ? 'gn-phone__screen' : 'card-frame__screen'}>
+          <canvas ref={canvasRef} aria-label="News card preview" />
+          {isStory ? <div className={safeZones ? 'gn-safe is-on' : 'gn-safe'} /> : null}
+        </div>
+        {isStory ? <div className="gn-phone__notch" /> : null}
+      </div>
+      <p className="card-preview__caption" title={size.label}>
+        {size.label.split(' — ')[1] ?? size.label} · {size.width}×{size.height}
+      </p>
+    </>
+  );
+
   return (
     <>
       <section id="step-card" className="gn-card app-section designer-card">
-        <header className="gn-card__head">
-          <div>
-            <span className="gn-eyebrow">Card studio</span>
-            <h2 className="gn-h2">
-              <span className="gn-step">4</span>Branded news card
-            </h2>
-          </div>
-          <span className="gn-chip gn-chip--plain">{formatSizes[format].width}×{formatSizes[format].height}px</span>
-        </header>
+        <StepHead
+          step={4}
+          name="Card studio"
+          title="Branded news card"
+          sub={wide ? 'Pick a template and a licensed photo — the preview on the right updates live.' : 'Pick a template and a licensed photo — the preview updates live.'}
+        >
+          <span className="gn-chip gn-chip--plain">
+            {size.width}×{size.height}px
+          </span>
+        </StepHead>
 
         <div className="designer-templates">
           <div className="gn-seg app-seg" role="group" aria-label="Card template">
@@ -643,382 +840,511 @@ export default function CardDesigner({
           <p className="designer-note">{templateMeta[template].note}</p>
         </div>
 
-        <div className="designer-grid">
-          <div className="designer-controls">
-            <div className="app-group">
-              <h3 className="app-group__title">Photo</h3>
+        <div ref={stepPreviewRef} className="designer-preview-host" />
 
-              <label className="gn-field">
-                <span className="gn-label">
-                  Search free-to-use photos <span className="gn-hint">(Wikimedia Commons + Openverse)</span>
-                </span>
-                <div className="search-row">
-                  <input
-                    className="gn-input"
-                    value={query}
-                    onChange={(event) => setQuery(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter') {
-                        event.preventDefault();
-                        void runImageSearch();
-                      }
-                    }}
-                    placeholder="e.g. Ghana High Commission, Accra market, Black Stars"
-                  />
+        <div className="designer-groups">
+          <Panel
+            icon="photo"
+            title="Photo & clips"
+            className="media-panel"
+            aside={
+              <div className="gn-seg media-seg" role="group" aria-label="Search for">
+                <button type="button" className={mediaMode === 'photos' ? 'is-on' : undefined} aria-pressed={mediaMode === 'photos'} onClick={() => switchMediaMode('photos')}>
+                  Photos
+                </button>
+                <button type="button" className={mediaMode === 'clips' ? 'is-on' : undefined} aria-pressed={mediaMode === 'clips'} onClick={() => switchMediaMode('clips')}>
+                  News clips
+                </button>
+              </div>
+            }
+          >
+            {mediaMode === 'clips' ? (
+              <p className="designer-note clip-note">Real news footage that's free to reuse (public domain / Creative Commons) — credited on screen.</p>
+            ) : null}
+
+            <label className="gn-field">
+              <span className="gn-label">
+                {mediaMode === 'clips' ? (
+                  <>
+                    Search news footage <span className="gn-hint">(Wikimedia Commons)</span>
+                  </>
+                ) : (
+                  <>
+                    Search free-to-use photos <span className="gn-hint">(Wikimedia Commons + Openverse)</span>
+                  </>
+                )}
+              </span>
+              <div className="search-row">
+                <input
+                  className="gn-input"
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault();
+                      void (mediaMode === 'clips' ? runClipSearch() : runImageSearch());
+                    }
+                  }}
+                  placeholder={mediaMode === 'clips' ? 'e.g. Accra floods, AU summit, Ghana parliament' : 'e.g. Ghana High Commission, Accra market, Black Stars'}
+                />
+                {mediaMode === 'clips' ? (
+                  <button type="button" className="gn-btn" onClick={() => void runClipSearch()} disabled={clipSearching}>
+                    {clipSearching ? 'Searching…' : 'Search'}
+                  </button>
+                ) : (
                   <button type="button" className="gn-btn" onClick={() => void runImageSearch()} disabled={searching}>
                     {searching ? 'Searching…' : 'Search'}
                   </button>
-                </div>
-              </label>
+                )}
+              </div>
+            </label>
 
-              <button type="button" className="gn-btn app-finder" onClick={() => void findImagesForStory()} disabled={searching}>
-                {searching ? 'Finding images…' : '✦ Find images for the selected story'}
+            {mediaMode === 'clips' ? (
+              <>
+                {captions.length > 0 ? (
+                  <div className="query-chips">
+                    <span className="designer-note">Use for:</span>
+                    {captions.map((_, index) => (
+                      <button
+                        key={index}
+                        type="button"
+                        className={searchTarget === index ? 'gn-chip gn-chip--plain gn-chip--btn is-on' : 'gn-chip gn-chip--plain gn-chip--btn'}
+                        aria-pressed={searchTarget === index}
+                        onClick={() => setSearchTarget(index)}
+                      >
+                        Clip {index + 1}
+                        {isBeatClip(beatImages[index]) ? ' ▶' : beatImages[index] ? ' ✓' : ''}
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="designer-note">Add on-screen captions in step 5 first — each news clip plays under one caption.</p>
+                )}
+
+                {clipError ? <p className="designer-note danger-note">{clipError}</p> : null}
+
+                {clipResults.length > 0 ? (
+                  <>
+                    <div className="clip-results">
+                      {clipResults.map((result) => (
+                        <div key={result.src} className={loadingClip === result.src ? 'clip-tile is-loading' : 'clip-tile'}>
+                          <button
+                            type="button"
+                            className="clip-tile__pick"
+                            onClick={() => void useClipResult(result)}
+                            disabled={typeof searchTarget !== 'number' || Boolean(loadingClip)}
+                            title={result.description || result.title}
+                          >
+                            <span className="clip-tile__poster">
+                              {result.poster ? <img src={result.poster} alt="" loading="lazy" /> : null}
+                              <span className="clip-tile__play" aria-hidden="true">
+                                ▶
+                              </span>
+                              <span className="clip-tile__dur">{formatDuration(result.durationS)}</span>
+                              {result.year ? <span className="clip-tile__year">{result.year}</span> : null}
+                            </span>
+                            <span className="clip-tile__title">{loadingClip === result.src ? 'Loading clip…' : result.title}</span>
+                          </button>
+                          <span className="clip-tile__credit">
+                            {result.by} · {result.license}
+                            {result.sourcePage ? (
+                              <>
+                                {' · '}
+                                <a href={result.sourcePage} target="_blank" rel="noreferrer">
+                                  source ↗
+                                </a>
+                              </>
+                            ) : null}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                    <p className="designer-note">
+                      {typeof searchTarget === 'number'
+                        ? `Click a clip to play it under Clip ${searchTarget + 1}. Check the license on its source page before publishing.`
+                        : 'Pick a clip number above, then click a clip to use it for that beat.'}
+                    </p>
+                  </>
+                ) : clipSearched && !clipSearching && !clipError ? (
+                  <div className="gn-empty clip-empty">
+                    <strong>No free-to-reuse footage for “{query.trim()}”.</strong>
+                    <span>
+                      Commons mostly has real video of big filmed events — strikes, disasters, summits, heads of state. Try the event, place or person by name, or
+                      use a photo for this beat.
+                    </span>
+                  </div>
+                ) : null}
+              </>
+            ) : (
+              <>
+                <button type="button" className="gn-btn app-finder" onClick={() => void findImagesForStory()} disabled={searching}>
+                  {searching ? 'Finding images…' : '✦ Find images for the selected story'}
+                </button>
+
+                {storyQueries.length > 0 ? (
+                  <div className="query-chips">
+                    <span className="designer-note">Steer the search:</span>
+                    {storyQueries.map((storyQuery) => (
+                      <button
+                        key={storyQuery}
+                        type="button"
+                        className="gn-chip gn-chip--plain gn-chip--btn"
+                        disabled={searching}
+                        onClick={() => {
+                          setQuery(storyQuery);
+                          void executeSearch([storyQuery]);
+                        }}
+                      >
+                        {storyQuery}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+
+                {plan ? (
+                  <p className="designer-note">
+                    {plan.source === 'ai' ? '✦ ' : ''}Read “{plan.raw}” as: <strong>{plan.interpretation}</strong>
+                    {plan.sensitive ? ' · sensitive story — avoid a person photo' : ''}
+                  </p>
+                ) : null}
+
+                {searchError ? <p className="designer-note danger-note">{searchError}</p> : null}
+
+                {results.length > 0 ? (
+                  <>
+                    {captions.length > 0 ? (
+                      <div className="query-chips">
+                        <span className="designer-note">Apply pick to:</span>
+                        {(['main', ...captions.map((_, i) => i)] as ('main' | number)[]).map((target) => {
+                          const active = searchTarget === target;
+                          const label = target === 'main' ? 'Main photo' : `Clip ${target + 1}${beatImages[target] ? ' ✓' : ''}`;
+                          return (
+                            <button
+                              key={String(target)}
+                              type="button"
+                              className={active ? 'gn-chip gn-chip--plain gn-chip--btn is-on' : 'gn-chip gn-chip--plain gn-chip--btn'}
+                              aria-pressed={active}
+                              onClick={() => setSearchTarget(target)}
+                            >
+                              {label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ) : null}
+                    <div className="image-results">
+                      {results.map((result) => (
+                        <button
+                          key={result.id}
+                          type="button"
+                          className={loadingImageId === result.id ? 'image-result loading' : 'image-result'}
+                          onClick={() => void useSearchResult(result)}
+                          title={`${result.title} — ${result.author} (${result.license})`}
+                        >
+                          <img src={result.thumbUrl} alt={result.title} loading="lazy" />
+                          <span>{loadingImageId === result.id ? 'Loading…' : `${result.license} · ${result.provider}`}</span>
+                        </button>
+                      ))}
+                    </div>
+                    <p className="designer-note">
+                      {typeof searchTarget === 'number'
+                        ? `Click a photo to use it for Clip ${searchTarget + 1}. Confirm the license on the source page before publishing.`
+                        : 'Click a photo to load it as the main photo — the credit line is filled in automatically. Always confirm the license on the source page before publishing.'}
+                    </p>
+                  </>
+                ) : null}
+
+                <label className="gn-field">
+                  <span className="gn-label">
+                    Or upload your own photo <span className="gn-hint">(use one you have the rights to)</span>
+                  </span>
+                  <input className="gn-input app-file" type="file" accept="image/*" onChange={(event) => handlePhotoUpload(event.target.files)} />
+                </label>
+                {photoName ? (
+                  <p className="designer-note">
+                    Loaded: {photoName}
+                    {photoSourcePage ? (
+                      <>
+                        {' · '}
+                        <a href={photoSourcePage} target="_blank" rel="noreferrer">
+                          View source & license
+                        </a>
+                      </>
+                    ) : null}
+                  </p>
+                ) : (
+                  <p className="designer-note">No photo yet — a placeholder background is shown.</p>
+                )}
+
+                {suggestedLink ? (
+                  <>
+                    <button type="button" className="gn-btn gn-btn--sm gn-btn--ghost app-btn-start" onClick={() => void previewArticleImage()} disabled={refLoading}>
+                      {refLoading ? 'Fetching…' : "👁 Preview the article's own photo (reference only)"}
+                    </button>
+                    {refError ? <p className="designer-note danger-note">{refError}</p> : null}
+                    {refImage ? (
+                      <div className="ref-preview">
+                        <img src={refImage} alt="Article preview — reference only" />
+                        <p className="designer-note danger-note">
+                          Reference only — this is the outlet's copyrighted photo. Do not put it on a card. Use it to decide what to search for above.
+                        </p>
+                      </div>
+                    ) : null}
+                  </>
+                ) : null}
+
+                <label className="gn-field">
+                  <span className="gn-label">
+                    Photo darkness — {Math.round(dim * 100)}% <span className="gn-hint">(darker suits somber stories)</span>
+                  </span>
+                  <input
+                    className="app-range"
+                    type="range"
+                    min={0}
+                    max={80}
+                    step={5}
+                    value={Math.round(dim * 100)}
+                    onChange={(event) => setDim(Number(event.target.value) / 100)}
+                  />
+                </label>
+              </>
+            )}
+          </Panel>
+
+          <Panel
+            icon="text"
+            title="Card text"
+            aside={
+              <button type="button" className="gn-btn gn-btn--xs" onClick={useSelectedStory}>
+                Use selected story
               </button>
+            }
+          >
+            <label className="gn-field">
+              <span className="gn-label">{headlineLabels[template]}</span>
+              <textarea className="gn-textarea" value={headline} onChange={(event) => setHeadline(event.target.value)} rows={template === 'recap' ? 6 : 3} />
+            </label>
 
-              {storyQueries.length > 0 ? (
-                <div className="query-chips">
-                  <span className="designer-note">Steer the search:</span>
-                  {storyQueries.map((storyQuery) => (
+            {template === 'headline' || template === 'update' ? (
+              <>
+                <label className="gn-field">
+                  <span className="gn-label">
+                    Subline <span className="gn-hint">(optional — one sentence of context under the headline)</span>
+                  </span>
+                  <input className="gn-input" value={subline} onChange={(event) => setSubline(event.target.value)} placeholder="e.g. Colombia 1-0 Ghana in the round of 32 — after a run that included holding England" />
+                </label>
+                <label className="gn-field">
+                  <span className="gn-label">
+                    Highlight phrase <span className="gn-hint">(colored words inside the headline — skip for tragedy)</span>
+                  </span>
+                  <input className="gn-input" value={highlight} onChange={(event) => setHighlight(event.target.value)} placeholder="e.g. End American Financial Aid" />
+                </label>
+                <div className="gn-field">
+                  <span className="gn-label app-label-row">
+                    <label htmlFor="card-heading-shift">
+                      Heading position — {textShift === 0 ? 'auto' : `${textShift > 0 ? 'higher' : 'lower'} ${Math.round(Math.abs(textShift) * 100)}%`}
+                    </label>
+                    {textShift !== 0 ? (
+                      <button type="button" className="link-button" onClick={() => setTextShift(0)}>
+                        reset
+                      </button>
+                    ) : null}
+                  </span>
+                  <input
+                    id="card-heading-shift"
+                    className="app-range"
+                    type="range"
+                    min={-100}
+                    max={100}
+                    step={5}
+                    value={Math.round(textShift * 100)}
+                    onChange={(event) => setTextShift(Number(event.target.value) / 100)}
+                  />
+                </div>
+              </>
+            ) : null}
+
+            {template === 'quote' ? (
+              <label className="gn-field">
+                <span className="gn-label">Who said it (name, title)</span>
+                <input className="gn-input" value={attribution} onChange={(event) => setAttribution(event.target.value)} placeholder="e.g. Ghana High Commissioner to South Africa" />
+              </label>
+            ) : null}
+
+            {template === 'post' ? (
+              <>
+                <div className="field-grid">
+                  <label className="gn-field">
+                    <span className="gn-label">Name (as shown on the post)</span>
+                    <input className="gn-input" value={attribution} onChange={(event) => setAttribution(event.target.value)} placeholder="e.g. Ministry of Information" />
+                  </label>
+                  <label className="gn-field">
+                    <span className="gn-label">Handle / page name</span>
+                    <input className="gn-input" value={postHandle} onChange={(event) => setPostHandle(event.target.value)} placeholder="e.g. @moinfoghana" />
+                  </label>
+                </div>
+                <label className="gn-field">
+                  <span className="gn-label">Meta line (time · date · platform)</span>
+                  <input className="gn-input" value={postMeta} onChange={(event) => setPostMeta(event.target.value)} placeholder="e.g. 6:41 PM · 5 Jul 2026 · X" />
+                </label>
+                <p className="designer-note">
+                  This renders our own styled graphic of the statement — always quote their exact words and keep the source line filled in.
+                </p>
+              </>
+            ) : null}
+
+            {template === 'update' ? (
+              <div className="gn-field">
+                <span className="gn-label">Banner</span>
+                <div className="chip-row" role="group" aria-label="Banner">
+                  {chipOrder.map((label) => (
                     <button
-                      key={storyQuery}
+                      key={label}
                       type="button"
-                      className="gn-chip gn-chip--plain app-chip-btn"
-                      disabled={searching}
-                      onClick={() => {
-                        setQuery(storyQuery);
-                        void executeSearch([storyQuery]);
-                      }}
+                      className={chip === label ? `chip-button active chip-${label.toLowerCase()}` : 'chip-button'}
+                      aria-pressed={chip === label}
+                      onClick={() => setChip(label)}
                     >
-                      {storyQuery}
+                      {label}
                     </button>
                   ))}
                 </div>
-              ) : null}
+              </div>
+            ) : null}
 
-              {plan ? (
-                <p className="designer-note">
-                  {plan.source === 'ai' ? '✦ ' : ''}Read “{plan.raw}” as: <strong>{plan.interpretation}</strong>
-                  {plan.sensitive ? ' · sensitive story — avoid a person photo' : ''}
-                </p>
-              ) : null}
-
-              {searchError ? <p className="designer-note danger-note">{searchError}</p> : null}
-
-              {results.length > 0 ? (
-                <>
-                  {captionLines().length > 0 ? (
-                    <div className="query-chips">
-                      <span className="designer-note">Apply pick to:</span>
-                      {(['main', ...captionLines().map((_, i) => i)] as ('main' | number)[]).map((target) => {
-                        const active = searchTarget === target;
-                        const label = target === 'main' ? 'Main photo' : `Clip ${target + 1}${beatImages[target] ? ' ✓' : ''}`;
-                        return (
-                          <button
-                            key={String(target)}
-                            type="button"
-                            className={active ? 'gn-chip gn-chip--plain app-chip-btn is-on' : 'gn-chip gn-chip--plain app-chip-btn'}
-                            aria-pressed={active}
-                            onClick={() => setSearchTarget(target)}
-                          >
-                            {label}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  ) : null}
-                  <div className="image-results">
-                    {results.map((result) => (
-                      <button
-                        key={result.id}
-                        type="button"
-                        className={loadingImageId === result.id ? 'image-result loading' : 'image-result'}
-                        onClick={() => void useSearchResult(result)}
-                        title={`${result.title} — ${result.author} (${result.license})`}
-                      >
-                        <img src={result.thumbUrl} alt={result.title} loading="lazy" />
-                        <span>{loadingImageId === result.id ? 'Loading…' : `${result.license} · ${result.provider}`}</span>
-                      </button>
-                    ))}
-                  </div>
-                  <p className="designer-note">
-                    {typeof searchTarget === 'number'
-                      ? `Click a photo to use it for Clip ${searchTarget + 1}. Confirm the license on the source page before publishing.`
-                      : 'Click a photo to load it as the main photo — the credit line is filled in automatically. Always confirm the license on the source page before publishing.'}
-                  </p>
-                </>
-              ) : null}
-
+            {template === 'stat' ? (
               <label className="gn-field">
-                <span className="gn-label">
-                  Or upload your own photo <span className="gn-hint">(use one you have the rights to)</span>
-                </span>
-                <input className="gn-input app-file" type="file" accept="image/*" onChange={(event) => handlePhotoUpload(event.target.files)} />
+                <span className="gn-label">The number (e.g. GH₵ 12.4bn, 23, 87%)</span>
+                <input className="gn-input" value={statValue} onChange={(event) => setStatValue(event.target.value)} placeholder="e.g. 23" />
               </label>
-              {photoName ? (
-                <p className="designer-note">
-                  Loaded: {photoName}
-                  {photoSourcePage ? (
-                    <>
-                      {' · '}
-                      <a href={photoSourcePage} target="_blank" rel="noreferrer">
-                        View source & license
-                      </a>
-                    </>
-                  ) : null}
-                </p>
-              ) : (
-                <p className="designer-note">No photo yet — a placeholder background is shown.</p>
-              )}
+            ) : null}
 
-              {suggestedLink ? (
-                <>
-                  <button type="button" className="gn-btn gn-btn--sm gn-btn--ghost app-btn-start" onClick={() => void previewArticleImage()} disabled={refLoading}>
-                    {refLoading ? 'Fetching…' : "👁 Preview the article's own photo (reference only)"}
-                  </button>
-                  {refError ? <p className="designer-note danger-note">{refError}</p> : null}
-                  {refImage ? (
-                    <div className="ref-preview">
-                      <img src={refImage} alt="Article preview — reference only" />
-                      <p className="designer-note danger-note">
-                        Reference only — this is the outlet's copyrighted photo. Do not put it on a card. Use it to decide what to search for above.
-                      </p>
-                    </div>
-                  ) : null}
-                </>
-              ) : null}
-
-              <label className="gn-field">
-                <span className="gn-label">
-                  Photo darkness — {Math.round(dim * 100)}% <span className="gn-hint">(darker suits somber stories)</span>
-                </span>
-                <input
-                  className="app-range"
-                  type="range"
-                  min={0}
-                  max={80}
-                  step={5}
-                  value={Math.round(dim * 100)}
-                  onChange={(event) => setDim(Number(event.target.value) / 100)}
-                />
-              </label>
-            </div>
-
-            <div className="app-group">
-              <div className="app-group__head">
-                <h3 className="app-group__title">Card text</h3>
-                <button type="button" className="gn-btn gn-btn--xs" onClick={useSelectedStory}>
-                  Use selected story
+            {template === 'recap' ? (
+              <>
+                <button
+                  type="button"
+                  className="gn-btn app-finder"
+                  onClick={() => {
+                    setHeadline(weeklyHeadlines.join('\n'));
+                    setAttribution(weeklyRange);
+                  }}
+                  disabled={weeklyHeadlines.length === 0}
+                >
+                  {weeklyHeadlines.length > 0
+                    ? `✦ Fill from this week's log (${weeklyHeadlines.length} stories)`
+                    : 'No logged stories this week yet'}
                 </button>
-              </div>
+                <label className="gn-field">
+                  <span className="gn-label">Subtitle (e.g. the date range)</span>
+                  <input className="gn-input" value={attribution} onChange={(event) => setAttribution(event.target.value)} placeholder="e.g. June 29 – July 4, 2026" />
+                </label>
+              </>
+            ) : null}
+          </Panel>
 
+          <Panel icon="palette" title="Look & format" className="designer-groups__wide">
+            <div className="look-grid look-grid--accent">
               <label className="gn-field">
-                <span className="gn-label">{headlineLabels[template]}</span>
-                <textarea className="gn-textarea" value={headline} onChange={(event) => setHeadline(event.target.value)} rows={template === 'recap' ? 6 : 3} />
+                <span className="gn-label">Accent color</span>
+                <input type="color" value={accent} onChange={(event) => setAccent(event.target.value)} className="gn-input color-input" />
               </label>
-
-              {template === 'headline' || template === 'update' ? (
-                <>
-                  <label className="gn-field">
-                    <span className="gn-label">
-                      Subline <span className="gn-hint">(optional — one sentence of context under the headline)</span>
-                    </span>
-                    <input className="gn-input" value={subline} onChange={(event) => setSubline(event.target.value)} placeholder="e.g. Colombia 1-0 Ghana in the round of 32 — after a run that included holding England" />
-                  </label>
-                  <label className="gn-field">
-                    <span className="gn-label">
-                      Highlight phrase <span className="gn-hint">(colored words inside the headline — skip for tragedy)</span>
-                    </span>
-                    <input className="gn-input" value={highlight} onChange={(event) => setHighlight(event.target.value)} placeholder="e.g. End American Financial Aid" />
-                  </label>
-                  <label className="gn-field">
-                    <span className="gn-label">
-                      Heading position — {textShift === 0 ? 'auto' : `${textShift > 0 ? 'higher' : 'lower'} ${Math.round(Math.abs(textShift) * 100)}%`}
-                      {textShift !== 0 ? (
-                        <button type="button" className="link-button" onClick={() => setTextShift(0)}>
-                          reset
-                        </button>
-                      ) : null}
-                    </span>
-                    <input
-                      className="app-range"
-                      type="range"
-                      min={-100}
-                      max={100}
-                      step={5}
-                      value={Math.round(textShift * 100)}
-                      onChange={(event) => setTextShift(Number(event.target.value) / 100)}
-                    />
-                  </label>
-                </>
-              ) : null}
-
-              {template === 'quote' ? (
-                <label className="gn-field">
-                  <span className="gn-label">Who said it (name, title)</span>
-                  <input className="gn-input" value={attribution} onChange={(event) => setAttribution(event.target.value)} placeholder="e.g. Ghana High Commissioner to South Africa" />
-                </label>
-              ) : null}
-
-              {template === 'post' ? (
-                <>
-                  <div className="field-grid">
-                    <label className="gn-field">
-                      <span className="gn-label">Name (as shown on the post)</span>
-                      <input className="gn-input" value={attribution} onChange={(event) => setAttribution(event.target.value)} placeholder="e.g. Ministry of Information" />
-                    </label>
-                    <label className="gn-field">
-                      <span className="gn-label">Handle / page name</span>
-                      <input className="gn-input" value={postHandle} onChange={(event) => setPostHandle(event.target.value)} placeholder="e.g. @moinfoghana" />
-                    </label>
-                  </div>
-                  <label className="gn-field">
-                    <span className="gn-label">Meta line (time · date · platform)</span>
-                    <input className="gn-input" value={postMeta} onChange={(event) => setPostMeta(event.target.value)} placeholder="e.g. 6:41 PM · 5 Jul 2026 · X" />
-                  </label>
-                  <p className="designer-note">
-                    This renders our own styled graphic of the statement — always quote their exact words and keep the source line filled in.
-                  </p>
-                </>
-              ) : null}
-
-              {template === 'update' ? (
-                <label className="gn-field">
-                  <span className="gn-label">Banner</span>
-                  <div className="chip-row">
-                    {chipOrder.map((label) => (
-                      <button
-                        key={label}
-                        type="button"
-                        className={chip === label ? `chip-button active chip-${label.toLowerCase()}` : 'chip-button'}
-                        onClick={() => setChip(label)}
-                      >
-                        {label}
-                      </button>
-                    ))}
-                  </div>
-                </label>
-              ) : null}
-
-              {template === 'stat' ? (
-                <label className="gn-field">
-                  <span className="gn-label">The number (e.g. GH₵ 12.4bn, 23, 87%)</span>
-                  <input className="gn-input" value={statValue} onChange={(event) => setStatValue(event.target.value)} placeholder="e.g. 23" />
-                </label>
-              ) : null}
-
-              {template === 'recap' ? (
-                <>
-                  <button
-                    type="button"
-                    className="gn-btn app-finder"
-                    onClick={() => {
-                      setHeadline(weeklyHeadlines.join('\n'));
-                      setAttribution(weeklyRange);
-                    }}
-                    disabled={weeklyHeadlines.length === 0}
-                  >
-                    {weeklyHeadlines.length > 0
-                      ? `✦ Fill from this week's log (${weeklyHeadlines.length} stories)`
-                      : 'No logged stories this week yet'}
-                  </button>
-                  <label className="gn-field">
-                    <span className="gn-label">Subtitle (e.g. the date range)</span>
-                    <input className="gn-input" value={attribution} onChange={(event) => setAttribution(event.target.value)} placeholder="e.g. June 29 – July 4, 2026" />
-                  </label>
-                </>
-              ) : null}
+              <label className="gn-field">
+                <span className="gn-label">Format</span>
+                <select className="gn-select" value={format} onChange={(event) => setFormat(event.target.value as CardFormat)}>
+                  {(Object.keys(formatSizes) as CardFormat[]).map((key) => (
+                    <option key={key} value={key}>
+                      {formatSizes[key].label}
+                    </option>
+                  ))}
+                </select>
+              </label>
             </div>
-
-            <div className="app-group">
-              <h3 className="app-group__title">Look &amp; format</h3>
-              <div className="field-grid">
-                <label className="gn-field">
-                  <span className="gn-label">Accent color</span>
-                  <input type="color" value={accent} onChange={(event) => setAccent(event.target.value)} className="gn-input color-input" />
-                </label>
-                <label className="gn-field">
-                  <span className="gn-label">Format</span>
-                  <select className="gn-select" value={format} onChange={(event) => setFormat(event.target.value as CardFormat)}>
-                    {(Object.keys(formatSizes) as CardFormat[]).map((key) => (
-                      <option key={key} value={key}>
-                        {formatSizes[key].label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              </div>
-
-              <div className="field-grid">
-                <label className="gn-field">
-                  <span className="gn-label">Handle strip</span>
-                  <input className="gn-input" value={handle} onChange={(event) => setHandle(event.target.value)} />
-                </label>
-                <label className="gn-field">
-                  <span className="gn-label">Credit / footer line</span>
-                  <input className="gn-input" value={footer} onChange={(event) => setFooter(event.target.value)} placeholder="Photo: Author · License · Source" />
-                </label>
-              </div>
+            <div className="look-grid">
+              <label className="gn-field">
+                <span className="gn-label">Handle strip</span>
+                <input className="gn-input" value={handle} onChange={(event) => setHandle(event.target.value)} />
+              </label>
+              <label className="gn-field">
+                <span className="gn-label">Credit / footer line</span>
+                <input className="gn-input" value={footer} onChange={(event) => setFooter(event.target.value)} placeholder="Photo: Author · License · Source" />
+              </label>
             </div>
-          </div>
+          </Panel>
+        </div>
 
-          <div className="designer-preview">
-            <div className="designer-preview__frame">
-              <canvas ref={canvasRef} aria-label="News card preview" />
-            </div>
-            <div className="designer-actions">
-              <button type="button" className="gn-btn gn-btn--sm" onClick={copyCardToClipboard}>
-                {copied ? 'Copied ✓' : 'Copy image'}
+        <div className="designer-export">
+          <span className="designer-export__label">Export this card</span>
+          <div className="gn-actions">
+            <button type="button" className="gn-btn gn-btn--sm" onClick={copyCardToClipboard}>
+              {copied ? 'Copied ✓' : 'Copy image'}
+            </button>
+            {typeof navigator !== 'undefined' && 'canShare' in navigator ? (
+              <button type="button" className="gn-btn gn-btn--sm" onClick={() => void shareCard()}>
+                Share card
               </button>
-              {typeof navigator !== 'undefined' && 'canShare' in navigator ? (
-                <button type="button" className="gn-btn gn-btn--sm" onClick={() => void shareCard()}>
-                  Share card
-                </button>
-              ) : null}
-              <button type="button" className="gn-btn gn-btn--sm" onClick={() => void downloadAllSizes()}>
-                Download all sizes
-              </button>
-              <button type="button" className="gn-btn gn-btn--primary gn-btn--block" onClick={() => void downloadCard()}>
-                Download PNG
-              </button>
-            </div>
+            ) : null}
+            <button type="button" className="gn-btn gn-btn--sm" onClick={() => void downloadAllSizes()}>
+              Download all sizes
+            </button>
+            <button type="button" className="gn-btn gn-btn--sm gn-btn--primary" onClick={() => void downloadCard()}>
+              Download PNG
+            </button>
           </div>
         </div>
       </section>
 
       <section id="step-video" className="gn-card app-section">
-        <header className="gn-card__head">
-          <div>
-            <span className="gn-eyebrow">Video &amp; voice</span>
-            <h2 className="gn-h2">
-              <span className="gn-step">5</span>Turn the card into a video
-            </h2>
-          </div>
-          {videoExportSupported() ? (
-            <div className="gn-actions">
-              <button type="button" className="gn-btn gn-btn--primary" onClick={() => void downloadVideo()} disabled={videoProgress >= 0}>
-                {videoProgress >= 0 ? <span className="gn-spin" aria-hidden="true" /> : null}
-                {videoProgress >= 0 ? `Rendering video… ${Math.round(videoProgress * 100)}%` : '🎬 Export video'}
-              </button>
-            </div>
+        <StepHead step={5} name="Video & voice" title="Turn the card into a video" sub="Short captions on screen, a fuller narration for the voice, a photo or real news clip per beat — then export.">
+          {canExportVideo ? (
+            <button type="button" className="gn-btn gn-btn--primary" onClick={() => void downloadVideo()} disabled={videoProgress >= 0}>
+              {videoProgress >= 0 ? <span className="gn-spin" aria-hidden="true" /> : null}
+              {videoProgress >= 0 ? `Rendering video… ${Math.round(videoProgress * 100)}%` : '🎬 Export video'}
+            </button>
           ) : null}
-        </header>
+        </StepHead>
         {videoProgress >= 0 ? (
           <div className="video-progress" role="progressbar" aria-label="Video render progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(videoProgress * 100)}>
             <span style={{ width: `${Math.round(videoProgress * 100)}%` }} />
           </div>
         ) : null}
 
-        <div className="video-grid">
-          <div className="app-group">
-            <h3 className="app-group__title">Script</h3>
+        <div className="gn-stats video-stats">
+          <div className="gn-stat">
+            <span className="gn-stat__v">{captions.length}</span>
+            <span className="gn-stat__k">Captions</span>
+          </div>
+          <div className="gn-stat">
+            <span className="gn-stat__v">{narrationLines || '—'}</span>
+            <span className="gn-stat__k">Narration lines</span>
+          </div>
+          <div className="gn-stat">
+            <span className="gn-stat__v">{captions.length ? `${beatsWithMedia}/${captions.length}` : '—'}</span>
+            <span className="gn-stat__k">Beats with media</span>
+          </div>
+          <div className="gn-stat">
+            <span className="gn-stat__v">{clipCount}</span>
+            <span className="gn-stat__k">News clips</span>
+          </div>
+        </div>
+
+        <div className="video-groups">
+          <Panel
+            icon="script"
+            title="Script"
+            aside={
+              <button
+                type="button"
+                className="gn-btn gn-btn--xs gn-btn--primary"
+                onClick={() => void draftBeatsFromCard()}
+                disabled={draftingBeats || (!headline.trim() && !subline.trim() && !storyDetails.trim())}
+              >
+                {draftingBeats ? 'Drafting…' : '✦ Draft from card'}
+              </button>
+            }
+          >
             <label className="gn-field">
-              <span className="gn-label app-label-row">
-                <span>
-                  Story details for the script <span className="gn-hint">(optional — paste the article or key facts so the voice can tell the full story)</span>
-                </span>
-                <button type="button" className="gn-btn gn-btn--xs" onClick={() => void draftBeatsFromCard()} disabled={draftingBeats || (!headline.trim() && !subline.trim() && !storyDetails.trim())}>
-                  {draftingBeats ? 'drafting…' : 'draft from card'}
-                </button>
+              <span className="gn-label">
+                Story details for the script <span className="gn-hint">(optional — paste the article or key facts so the voice can tell the full story)</span>
               </span>
               <textarea
                 className="gn-textarea"
@@ -1052,65 +1378,91 @@ export default function CardDesigner({
                 placeholder={'Leave blank to speak the captions. Or click “draft from card” to get a fuller, flowing narration here — the slides stay short while the voice tells the whole story.'}
               />
             </label>
-          </div>
+          </Panel>
 
-          <div className="app-group">
-            <h3 className="app-group__title">Pictures &amp; sound</h3>
-            {captionLines().length > 0 ? (
+          <Panel icon="film" title="Pictures & sound">
+            {captions.length > 0 ? (
               <div className="beat-images">
                 <div className="beat-images__head">
                   <span className="gn-label">
-                    Clip images <span className="gn-hint">— auto-fill a quick pick per caption, or edit a query and Find to choose from options</span>
+                    Clip media <span className="gn-hint">— auto-fill a quick photo per caption, edit a query and Find to choose, or pick a news clip in step 4</span>
                   </span>
                   <button type="button" className="gn-btn gn-btn--xs" onClick={() => void autoFillBeatImages()} disabled={fetchingBeatImages}>
                     {fetchingBeatImages ? 'finding…' : 'auto-fill images'}
                   </button>
                 </div>
                 <div className="beat-list">
-                  {captionLines().map((caption, index) => (
-                    <div key={index} className="beat">
-                      <div className="beat-row">
-                        <div className="beat-thumb">
-                          {beatImages[index] ? <img src={beatImages[index]!.src} alt="" /> : <span aria-hidden="true">▢</span>}
-                          <span className="beat-thumb__n">{index + 1}</span>
+                  {captions.map((caption, index) => {
+                    const media = beatImages[index];
+                    const clip = isBeatClip(media) ? media : null;
+                    const clipMeta = clip ? clipMetaRef.current.get(clip.video) : undefined;
+                    return (
+                      <div key={index} className={clip ? 'beat has-clip' : 'beat'}>
+                        <div className="beat-row">
+                          <div className={clip ? 'beat-thumb is-clip' : 'beat-thumb'}>
+                            {clip ? (
+                              clipMeta?.poster ? <img src={clipMeta.poster} alt="" /> : null
+                            ) : media ? (
+                              <img src={mediaSrc(media)} alt="" />
+                            ) : (
+                              <span aria-hidden="true">▢</span>
+                            )}
+                            {clip ? (
+                              <span className="beat-thumb__play" aria-hidden="true">
+                                ▶
+                              </span>
+                            ) : null}
+                            <span className="beat-thumb__n">{index + 1}</span>
+                          </div>
+                          <input
+                            className="gn-input"
+                            value={videoImageQueries[index] ?? ''}
+                            onChange={(event) => setBeatQuery(index, event.target.value)}
+                            placeholder={caption.replace(/^\[[^\]]*\]\s*/, '') || 'photo subject'}
+                          />
+                          <button type="button" className="gn-btn gn-btn--sm" onClick={() => void showBeatOptions(index)}>
+                            {beatOptionsOpen === index ? 'close' : 'find'}
+                          </button>
                         </div>
-                        <input
-                          className="gn-input"
-                          value={videoImageQueries[index] ?? ''}
-                          onChange={(event) => setBeatQuery(index, event.target.value)}
-                          placeholder={caption.replace(/^\[[^\]]*\]\s*/, '') || 'photo subject'}
-                        />
-                        <button type="button" className="gn-btn gn-btn--sm" onClick={() => void showBeatOptions(index)}>
-                          {beatOptionsOpen === index ? 'close' : 'find'}
-                        </button>
+                        {clip ? (
+                          <div className="beat-clip">
+                            <span className="gn-chip gn-chip--violet">News clip</span>
+                            <span className="beat-clip__label" title={clipMeta?.title}>
+                              {clip.label}
+                            </span>
+                            <button type="button" className="link-button" onClick={() => clearBeatMedia(index)}>
+                              use a photo instead
+                            </button>
+                          </div>
+                        ) : null}
+                        {beatOptionsOpen === index ? (
+                          <div className="beat-options">
+                            {loadingOptions === index ? (
+                              <span className="designer-note">searching…</span>
+                            ) : (beatOptions[index] ?? []).length === 0 ? (
+                              <span className="designer-note">no images found — try a different query</span>
+                            ) : (
+                              (beatOptions[index] ?? []).map((result) => (
+                                <button
+                                  key={result.id}
+                                  type="button"
+                                  className={mediaSrc(beatImages[index]) === result.fullUrl ? 'beat-option is-on' : 'beat-option'}
+                                  onClick={() => void chooseBeatImage(index, result)}
+                                  title={`${result.title} — ${result.provider}`}
+                                >
+                                  <img src={result.thumbUrl} alt="" />
+                                </button>
+                              ))
+                            )}
+                          </div>
+                        ) : null}
                       </div>
-                      {beatOptionsOpen === index ? (
-                        <div className="beat-options">
-                          {loadingOptions === index ? (
-                            <span className="designer-note">searching…</span>
-                          ) : (beatOptions[index] ?? []).length === 0 ? (
-                            <span className="designer-note">no images found — try a different query</span>
-                          ) : (
-                            (beatOptions[index] ?? []).map((result) => (
-                              <button
-                                key={result.id}
-                                type="button"
-                                className={beatImages[index]?.src === result.fullUrl ? 'beat-option is-on' : 'beat-option'}
-                                onClick={() => void chooseBeatImage(index, result)}
-                                title={`${result.title} — ${result.provider}`}
-                              >
-                                <img src={result.thumbUrl} alt="" />
-                              </button>
-                            ))
-                          )}
-                        </div>
-                      ) : null}
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             ) : (
-              <p className="designer-note">Add on-screen captions to pick a picture for each clip.</p>
+              <p className="designer-note">Add on-screen captions to pick a photo or news clip for each beat.</p>
             )}
 
             <div className="field-grid">
@@ -1122,14 +1474,14 @@ export default function CardDesigner({
                   <option value="minimal">Minimal — no zoom, hard cuts</option>
                 </select>
               </label>
-              <label className="gn-field">
+              <div className="gn-field">
                 <span className="gn-label app-label-row">
-                  Video sound
+                  <label htmlFor="video-sound">Video sound</label>
                   <button type="button" className="link-button" onClick={() => (previewingSound ? stopSoundPreview() : void previewSound())} disabled={videoSound === 'none'}>
                     {previewingSound ? 'stop' : 'preview'}
                   </button>
                 </span>
-                <select className="gn-select" value={videoSound} onChange={(event) => { stopSoundPreview(); setVideoSound(event.target.value); }}>
+                <select id="video-sound" className="gn-select" value={videoSound} onChange={(event) => { stopSoundPreview(); setVideoSound(event.target.value); }}>
                   <optgroup label="Moods">
                     {(Object.keys(SOUND_LABELS) as VideoSound[]).map((key) => (
                       <option key={key} value={key}>
@@ -1147,7 +1499,7 @@ export default function CardDesigner({
                     </optgroup>
                   ) : null}
                 </select>
-              </label>
+              </div>
             </div>
             <div className="field-grid">
               <label className="gn-field">
@@ -1173,9 +1525,26 @@ export default function CardDesigner({
                 </label>
               ) : null}
             </div>
-          </div>
+          </Panel>
         </div>
       </section>
+
+      {createPortal(preview, previewNode)}
+      {actionsHost
+        ? createPortal(
+            <>
+              <button type="button" className="gn-btn" onClick={() => void downloadCard()}>
+                Download PNG
+              </button>
+              {canExportVideo ? (
+                <button type="button" className="gn-btn" onClick={() => void downloadVideo()} disabled={videoProgress >= 0}>
+                  {videoProgress >= 0 ? `Rendering ${Math.round(videoProgress * 100)}%` : 'Export video'}
+                </button>
+              ) : null}
+            </>,
+            actionsHost,
+          )
+        : null}
     </>
   );
 }
