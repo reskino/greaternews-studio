@@ -13,9 +13,13 @@ Reads the key from secrets.json ("anthropic": {"api_key": "sk-ant-..."}) or the
 ANTHROPIC_API_KEY environment variable.
 """
 
+import io
 import json
 import os
+import re
 import sys
+import time
+import wave
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -204,15 +208,74 @@ def elevenlabs_tts(text, key, voice_id):
     return response.content
 
 
+def _groq_tts_once(text, keys, model, voice):
+    """One short line -> WAV, rotating through the Groq keys and waiting out short rate limits."""
+    last = None
+    for key in keys:
+        for attempt in range(3):
+            try:
+                response = requests.post(
+                    "https://api.groq.com/openai/v1/audio/speech",
+                    headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+                    json={"model": model, "input": text, "voice": voice, "response_format": "wav"},
+                    timeout=60,
+                )
+            except requests.RequestException as error:  # dropped connection (seen 2026-11-26): retry
+                last = f"network: {str(error)[:80]}"
+                time.sleep(2 * (attempt + 1))
+                continue
+            if response.status_code == 429:
+                wait = float(response.headers.get("retry-after") or 4 * (attempt + 1))
+                last = f"429 (retry-after {wait:.0f}s)"
+                if wait > 30:      # this key's quota is spent for a while -> next key
+                    break
+                time.sleep(wait)
+                continue
+            if response.status_code >= 400:
+                last = f"{response.status_code} {response.text[:100]}"
+                break
+            return response.content
+    raise RuntimeError(f"Groq TTS failed on all keys: {last}")
+
+
+def _tts_chunks(text, limit=190):
+    """Sentences packed into <= limit-char pieces (Groq rejects a whole 700-char narration with 429)."""
+    sentences = re.split(r"(?<=[.!?])\s+", text.strip())
+    chunks, cur = [], ""
+    for s in sentences:
+        while len(s) > limit:  # a very long sentence: split at the last comma/space before the limit
+            cut = max(s.rfind(", ", 0, limit), s.rfind(" ", 0, limit))
+            cut = cut if cut > 40 else limit
+            chunks.append(s[:cut].strip())
+            s = s[cut:].strip(" ,")
+        if cur and len(cur) + 1 + len(s) > limit:
+            chunks.append(cur)
+            cur = s
+        else:
+            cur = f"{cur} {s}".strip()
+    if cur:
+        chunks.append(cur)
+    return [c for c in chunks if c]
+
+
 def groq_tts(text, key, model, voice):
-    response = requests.post(
-        "https://api.groq.com/openai/v1/audio/speech",
-        headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-        json={"model": model, "input": text, "voice": voice, "response_format": "wav"},
-        timeout=60,
-    )
-    response.raise_for_status()
-    return response.content
+    """Narration -> one WAV: voiced line by line (all Groq keys, rate-limit aware) and joined."""
+    keys = [key] + [k for k in (load_secrets_dict().get("groq", {}).get("api_keys") or []) if k and k != key]
+    frames, params = [], None
+    for chunk in _tts_chunks(text):
+        with wave.open(io.BytesIO(_groq_tts_once(chunk, keys, model, voice))) as w:
+            if params is None:
+                params = w.getparams()
+            frames.append(w.readframes(w.getnframes()))
+            frames.append(b"\x00" * int(params.framerate * params.sampwidth * params.nchannels * 0.12))  # small pause
+    out = io.BytesIO()
+    with wave.open(out, "wb") as w:
+        # Groq's WAV header declares an unknown ("streaming", 0xFFFFFFFF) length — copy the format only.
+        w.setnchannels(params.nchannels)
+        w.setsampwidth(params.sampwidth)
+        w.setframerate(params.framerate)
+        w.writeframes(b"".join(frames))
+    return out.getvalue()
 
 
 # Returns (audio_bytes, content_type, None) on success, or (None, None, error_message) on failure.
@@ -388,6 +451,9 @@ def main():
     status = (f"Claude {MODEL} first, Groq as fallback" if key
               else "NO Claude key — add anthropic.api_key to secrets.json (Groq / heuristics only)")
     print(f"GreaterNews resolver on http://localhost:{PORT}/resolve  ({status})")
+    # Windows lets a second copy bind the same port (SO_REUSEADDR) and then requests land on the
+    # OLD copy's code — refuse to start twice instead (2026-11-26: a stale resolver served old TTS).
+    ThreadingHTTPServer.allow_reuse_address = False
     ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()
 
 

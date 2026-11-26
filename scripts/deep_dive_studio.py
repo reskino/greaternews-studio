@@ -32,6 +32,7 @@ import requests
 
 from claude_client import MODEL as CLAUDE_MODEL, ClaudeUnavailable, claude_json
 from claude_client import api_key as claude_api_key
+from claude_client import claude_research, last_json_block, run_claude_cli
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DD = os.path.join(ROOT, "content", "deep-dive")
@@ -217,6 +218,95 @@ def page_html():
     return html.replace("/*GN_UI*/", css, 1)
 
 
+def research_prompt(topic, length="auto"):
+    """The Deep Dive research brief for the claude CLI -> (slug, prompt)."""
+    slug = re.sub(r"[^a-z0-9]+", "-", topic.lower()).strip("-")[:40] or "deep-dive"
+    # Each chapter is ~10-12s of voice, so the chapter count sets the running time.
+    short = ("5 to 7 chapters (about 60-90 seconds) that arc: hook, what/where, why it matters, why now, "
+             "the numbers, the local impact, what's next")
+    long_ = ("9 to 13 chapters (about 2-3 minutes) for a big, multi-part story: hook, background, the "
+             "key moments in order, who the players are, the numbers, reactions, the Ghana/Africa "
+             "impact, what's next")
+    length_rule = {
+        "short": f"Write {short}.",
+        "long": f"Write {long_}. Only include facts your sources support - never pad to fill time.",
+    }.get(length, f"Choose the length the story deserves: {short} for a single development; or {long_} "
+                  f"when the story has several stages and enough verified facts to fill it. Never pad.")
+    prompt = (
+        f"You are the GreaterNews deep-dive researcher. Research this story for a Ghana-first news "
+        f"channel: \"{topic}\". Web-search and verify with 2+ independent current sources. "
+        f"Write TWO files. (1) content/deep-dive/{slug}.md: a cited brief — one-line summary, a Ghana/"
+        f"Africa angle if relevant, timeline, key facts (each with a source), the numbers, what's next, "
+        f"and a numbered References list with URLs. (2) content/deep-dive/spec.json with EXACTLY this shape: "
+        f'{{"slug":"{slug}","captions":"highlight","music":"generated","voice":"groq","groq_voice":"hannah",'
+        f'"cover":{{"headline":"6-9 word Title Case card headline","highlight":"2-4 words of it to colour gold",'
+        f'"subline":"one short sentence of context, under 16 words",'
+        f'"query":"a concrete image search for the cover photo naming the real subject"}},'
+        f'"post":{{"caption":"a punchy 1-2 sentence hook","body":"2-3 lines of the key facts",'
+        f'"sources":[{{"name":"Outlet (what it backs)","url":"https://real-url-from-your-research"}}],'
+        f'"cta":"Follow GreaterNews - news you can trust.","hashtags":["#GreaterNews","#Ghana","#Explainer"]}},'
+        f'"chapters":[{{"say":"one spoken sentence ~18-26 words, facts only","visual":{{"type":"broll, still or clip",'
+        f'"query":"a concrete Pexels/Google image subject"}}}}]}}. {length_rule} '
+        f"Keep every 'say' to ONE sentence of at most 26 words (the voice engine takes short lines). "
+        f"Facts only from your sources. "
+        f"Write numbers and dates in 'say' as WORDS (e.g. 'one-nil', 'June twenty-fourth') so the voice reads "
+        f"them right; captions turn them into digits. 'still' queries are Google image searches that name the "
+        f"real subject; 'broll' queries are generic Pexels stock-VIDEO searches that must literally show what "
+        f"is said (never name a person or place in a broll query; use a still for anything specific). "
+        f"'clip' = REAL news footage of the event, used only when a free-to-reuse copy exists (public-domain "
+        f"U.S. government video such as DVIDS military footage, VOA or the White House, or CC-licensed video "
+        f"on Wikimedia Commons); otherwise the build shows a photo for that query. Use 'clip' for 1-3 "
+        f"chapters about a concrete, filmed moment (strikes, disasters and rescues, summits, a head of "
+        f"state's speech), with a query worded like a news-archive title that names the subject, e.g. "
+        f"'U.S. forces strikes Iran' or 'Mahama speech Accra'. Never use broadcaster clips (TV news, "
+        f"YouTube news channels). "
+        f"The final chapter's spoken 'say' MUST end with the exact sign-off: Follow GreaterNews, news you can trust."
+    )
+    return slug, prompt
+
+
+API_DELIVERY = (
+    " DELIVERY: you cannot write files in this session. Instead, when the research is done, return ONE JSON "
+    "object in a single ```json fenced block, exactly: {\"brief_md\": \"<the full markdown brief described in (1)>\", "
+    "\"spec\": <the spec object described in (2)>}. Nothing after the block.")
+
+
+def run_research(topic, length="auto"):
+    """Research a topic into content/deep-dive/<slug>.md + spec.json. Claude API first (Anthropic-hosted web
+    search on the GreaterNews API credit — no CLI login, no subscription limits), the claude CLI's own login
+    as the fallback. Used by the Studio's Research button and the automatic Deep Dive (deep_dive_auto.py)."""
+    slug, prompt = research_prompt(topic, length)
+    log = ""
+    try:
+        text, usage = claude_research(
+            "You are the GreaterNews deep-dive researcher: verify every fact with 2+ independent current sources "
+            "and cite them. Never invent facts, quotes, numbers or URLs.", prompt + API_DELIVERY,
+            max_tokens=32000, effort="high")
+        data = last_json_block(text)
+        spec = data.get("spec") or {}
+        if spec.get("slug") != slug or not spec.get("chapters") or not data.get("brief_md"):
+            raise ClaudeUnavailable("reply was missing the brief or a valid spec")
+        with open(os.path.join(DD, f"{slug}.md"), "w", encoding="utf-8", newline="\n") as h:
+            h.write(data["brief_md"].rstrip() + "\n")
+        with open(SPEC, "w", encoding="utf-8", newline="\n") as h:
+            json.dump(spec, h, indent=2, ensure_ascii=False)
+        os.makedirs(os.path.join(DD, "specs"), exist_ok=True)
+        shutil.copy(SPEC, os.path.join(DD, "specs", f"{slug}.json"))
+        return {"ok": True, "engine": f"Claude API ({CLAUDE_MODEL}, {usage})", "slug": slug, "log": "researched via the API"}
+    except (ClaudeUnavailable, ValueError) as e:
+        log = f"[Claude API] {e}\n"
+
+    def check():  # the spec must really be for THIS topic (not a stale leftover)
+        written = json.load(open(SPEC, encoding="utf-8"))
+        return written.get("slug") == slug and bool(written.get("chapters"))
+
+    ok, engine, cli_log = run_claude_cli(prompt, check=check, timeout=900)
+    if ok:  # preserve this spec alongside the others
+        os.makedirs(os.path.join(DD, "specs"), exist_ok=True)
+        shutil.copy(SPEC, os.path.join(DD, "specs", f"{slug}.json"))
+    return {"ok": ok, "engine": engine, "slug": slug, "log": (log + cli_log) or "research failed"}
+
+
 class H(BaseHTTPRequestHandler):
     def _send(self, code, body, ctype="application/json"):
         b = body if isinstance(body, bytes) else body.encode("utf-8")
@@ -334,84 +424,7 @@ class H(BaseHTTPRequestHandler):
         self._send(404, "{}")
 
     def _research(self, topic, length="auto"):
-        slug = re.sub(r"[^a-z0-9]+", "-", topic.lower()).strip("-")[:40] or "deep-dive"
-        # Each chapter is ~10-12s of voice, so the chapter count sets the running time.
-        short = ("5 to 7 chapters (about 60-90 seconds) that arc: hook, what/where, why it matters, why now, "
-                 "the numbers, the local impact, what's next")
-        long_ = ("9 to 13 chapters (about 2-3 minutes) for a big, multi-part story: hook, background, the "
-                 "key moments in order, who the players are, the numbers, reactions, the Ghana/Africa "
-                 "impact, what's next")
-        length_rule = {
-            "short": f"Write {short}.",
-            "long": f"Write {long_}. Only include facts your sources support - never pad to fill time.",
-        }.get(length, f"Choose the length the story deserves: {short} for a single development; or {long_} "
-                      f"when the story has several stages and enough verified facts to fill it. Never pad.")
-        prompt = (
-            f"You are the GreaterNews deep-dive researcher. Research this story for a Ghana-first news "
-            f"channel: \"{topic}\". Web-search and verify with 2+ independent current sources. "
-            f"Write TWO files. (1) content/deep-dive/{slug}.md: a cited brief — one-line summary, a Ghana/"
-            f"Africa angle if relevant, timeline, key facts (each with a source), the numbers, what's next, "
-            f"and a numbered References list with URLs. (2) content/deep-dive/spec.json with EXACTLY this shape: "
-            f'{{"slug":"{slug}","captions":"highlight","music":"generated","voice":"groq","groq_voice":"hannah",'
-            f'"cover":{{"headline":"6-9 word Title Case card headline","highlight":"2-4 words of it to colour gold",'
-            f'"subline":"one short sentence of context, under 16 words",'
-            f'"query":"a concrete image search for the cover photo naming the real subject"}},'
-            f'"post":{{"caption":"a punchy 1-2 sentence hook","body":"2-3 lines of the key facts",'
-            f'"sources":[{{"name":"Outlet (what it backs)","url":"https://real-url-from-your-research"}}],'
-            f'"cta":"Follow GreaterNews - news you can trust.","hashtags":["#GreaterNews","#Ghana","#Explainer"]}},'
-            f'"chapters":[{{"say":"one spoken sentence ~18-26 words, facts only","visual":{{"type":"broll, still or clip",'
-            f'"query":"a concrete Pexels/Google image subject"}}}}]}}. {length_rule} '
-            f"Keep every 'say' to ONE sentence of at most 26 words (the voice engine takes short lines). "
-            f"Facts only from your sources. "
-            f"Write numbers and dates in 'say' as WORDS (e.g. 'one-nil', 'June twenty-fourth') so the voice reads "
-            f"them right; captions turn them into digits. 'still' queries are Google image searches that name the "
-            f"real subject; 'broll' queries are generic Pexels stock-VIDEO searches that must literally show what "
-            f"is said (never name a person or place in a broll query; use a still for anything specific). "
-            f"'clip' = REAL news footage of the event, used only when a free-to-reuse copy exists (public-domain "
-            f"U.S. government video such as DVIDS military footage, VOA or the White House, or CC-licensed video "
-            f"on Wikimedia Commons); otherwise the build shows a photo for that query. Use 'clip' for 1-3 "
-            f"chapters about a concrete, filmed moment (strikes, disasters and rescues, summits, a head of "
-            f"state's speech), with a query worded like a news-archive title that names the subject, e.g. "
-            f"'U.S. forces strikes Iran' or 'Mahama speech Accra'. Never use broadcaster clips (TV news, "
-            f"YouTube news channels). "
-            f"The final chapter's spoken 'say' MUST end with the exact sign-off: Follow GreaterNews, news you can trust."
-        )
-        # Run the claude CLI (web search + file writing) on the GreaterNews API key first, so research
-        # spends that Claude credit; if that fails (no key, credit used up), use the CLI's own login.
-        base_env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
-        attempts = []
-        key = claude_api_key()
-        if key:
-            attempts.append((f"Claude API credit ({CLAUDE_MODEL})", dict(base_env, ANTHROPIC_API_KEY=key),
-                             ["--model", CLAUDE_MODEL]))
-        attempts.append(("Claude Code login (fallback)", base_env, []))
-        log = ""
-        for label, env, extra in attempts:
-            try:
-                p = subprocess.run(
-                    ["claude", "-p", prompt,
-                     "--permission-mode", "bypassPermissions",
-                     "--output-format", "text",
-                     "--allowedTools", "Read,Write,WebSearch,WebFetch,Glob,Grep"] + extra,
-                    cwd=ROOT, capture_output=True, text=True, timeout=900, env=env,
-                    stdin=subprocess.DEVNULL, creationflags=NO_WINDOW)
-            except Exception as e:
-                log += f"[{label}] failed to run: {e}\n"
-                continue
-            ok = p.returncode == 0 and os.path.exists(SPEC)
-            if ok:  # confirm the spec is really for THIS topic (not a stale leftover), then preserve it
-                try:
-                    written = json.load(open(SPEC, encoding="utf-8"))
-                    ok = written.get("slug") == slug and bool(written.get("chapters"))
-                    if ok:
-                        os.makedirs(os.path.join(DD, "specs"), exist_ok=True)
-                        shutil.copy(SPEC, os.path.join(DD, "specs", f"{slug}.json"))
-                except Exception:
-                    ok = False
-            log += f"[{label}]\n" + (p.stdout or "")[-1200:] + (p.stderr or "")[-400:] + "\n"
-            if ok:
-                return self._send(200, json.dumps({"ok": True, "engine": label, "log": log}))
-        return self._send(200, json.dumps({"ok": False, "log": log or "research failed"}))
+        return self._send(200, json.dumps(run_research(topic, length)))
 
     def log_message(self, *a):
         pass
@@ -419,4 +432,7 @@ class H(BaseHTTPRequestHandler):
 
 if __name__ == "__main__":
     print(f"GreaterNews Deep Dive Studio -> http://localhost:{PORT}")
+    # Windows lets a second copy bind the same port (SO_REUSEADDR) and then requests land on the
+    # OLD copy's code — refuse to start twice instead (2026-11-26: a stale resolver served old TTS).
+    ThreadingHTTPServer.allow_reuse_address = False
     ThreadingHTTPServer(("127.0.0.1", PORT), H).serve_forever()
