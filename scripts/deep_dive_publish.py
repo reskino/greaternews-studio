@@ -34,8 +34,17 @@ def _source_line(s):
     return f"• {s}".strip()
 
 
-def build_post_text(post):
-    """Assemble the Facebook caption: hook -> body -> clickable sources -> CTA -> hashtags."""
+def _footage_line(c):
+    """A news clip's credit (CC BY / BY-SA need attribution; public domain gets it as courtesy)."""
+    who = (c.get("by") or "").strip()
+    lic = (c.get("license") or "").strip()
+    url = (c.get("url") or "").strip()
+    head = " · ".join(x for x in (who, lic) if x)
+    return f"• {head} — {url}" if url and head else (f"• {head or url}" if (head or url) else "")
+
+
+def build_post_text(post, footage=None):
+    """Assemble the Facebook caption: hook -> body -> clickable sources -> footage credits -> CTA -> hashtags."""
     caption = (post.get("caption") or "").strip()
     body = (post.get("body") or "").strip()
     sources = post.get("sources") or []
@@ -46,6 +55,9 @@ def build_post_text(post):
     src_lines = [ln for ln in (_source_line(s) for s in sources) if ln]
     if src_lines:
         parts.append("🔗 Sources\n" + "\n".join(src_lines))
+    foot_lines = list(dict.fromkeys(ln for ln in (_footage_line(c) for c in (footage or [])) if ln))
+    if foot_lines:
+        parts.append("🎥 Footage\n" + "\n".join(foot_lines))
     if cta:
         parts.append(cta)
     if hashtags:
@@ -61,7 +73,11 @@ def main(spec_path):
         print(f"No rendered video at content/{video_rel} — run deep_dive_build.py first.")
         sys.exit(1)
 
-    text = build_post_text(spec.get("post", {}))
+    credits_path = os.path.join(ROOT, "content", "deep-dive", f"{slug}_credits.json")
+    footage = []
+    if os.path.exists(credits_path):   # written by deep_dive_build.py when it used news clips
+        footage = (json.load(open(credits_path, encoding="utf-8")) or {}).get("footage") or []
+    text = build_post_text(spec.get("post", {}), footage)
 
     item = {"platform": "facebook", "status": "pending", "video": video_rel, "text": text}
     cover_rel = f"deep-dive/{slug}_cover.png"   # the build's cover card -> the video's thumbnail

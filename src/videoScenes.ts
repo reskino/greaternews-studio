@@ -2,7 +2,7 @@
 // PNG rendering in cardEngine.ts stays untouched — the only thing reused from there is the
 // public drawCard() (for the hero scene) and formatSizes. Beat/close slides are drawn here.
 import type { CardOptions } from './cardEngine';
-import { drawCard, formatSizes } from './cardEngine';
+import { drawCard, formatSizes, STORY_SAFE_TOP } from './cardEngine';
 
 const FONT_STACK = "'Poppins', 'IBM Plex Sans', sans-serif";
 const BG = '#060606';
@@ -68,11 +68,16 @@ function drawBrandStrip(ctx: Ctx, width: number, y: number) {
   ctx.stroke();
 }
 
-function drawGnBadge(ctx: Ctx, width: number, logo: HTMLImageElement | null) {
+// Top of the badge row: below the notch / app top bar on tall (9:16) frames.
+function badgeTop(width: number, height: number) {
+  return height / width > 1.5 ? Math.round(height * STORY_SAFE_TOP) : Math.round(width * 0.055);
+}
+
+function drawGnBadge(ctx: Ctx, width: number, height: number, logo: HTMLImageElement | null) {
   const size = Math.round(width * 0.085);
   const margin = Math.round(width * 0.055);
   const x = width - margin - size;
-  const y = margin;
+  const y = badgeTop(width, height);
 
   roundRect(ctx, x, y, size, size, Math.round(size * 0.22));
   ctx.fillStyle = 'rgba(0, 0, 0, 0.35)';
@@ -173,8 +178,10 @@ function parseBeat(raw: string): Beat {
 // Shared beat layout: brand strip, GN badge, an optional section-label kicker, and the beat
 // line — centered as one group. The caller draws the background (photo or brand) beforehand.
 function drawBeatContent(ctx: Ctx, options: CardOptions, beat: Beat, width: number, height: number) {
-  drawGnBadge(ctx, width, options.logo);
-  drawBrandStrip(ctx, width, Math.round(height * 0.1));
+  drawGnBadge(ctx, width, height, options.logo);
+  // Brand strip on the badge's row (vertically centred on it), clear of the notch.
+  const badgeSize = Math.round(width * 0.085);
+  drawBrandStrip(ctx, width, badgeTop(width, height) + Math.round((badgeSize - width * 0.028) / 2));
 
   const kickerFont = Math.round(width * 0.03);
   const hasLabel = beat.label.length > 0;

@@ -4,7 +4,11 @@ Approved spec (chapters: narration + a visual) -> vertical explainer:
 - ElevenLabs "with-timestamps" -> burned captions that reveal ONE WORD at a time (Poppins).
 - Stills come from a broad search (Google/Serper -> Commons -> Openverse -> Pexels) so specific
   subjects (a Ghana Shell station, a Strait map) resolve; b-roll comes from Pexels video.
-- Brand header on top: GREATERNEWS wordmark + the real GN logo in a rounded badge (like the cards).
+- "clip" chapters use REAL news footage when a free-to-reuse copy exists (Wikimedia Commons:
+  public-domain DVIDS/VOA/White House video, CC-licensed clips) or a file you supply; otherwise a still.
+  Credits go on screen and into <slug>_credits.json for the post text.
+- Brand header on top: GREATERNEWS wordmark + the real GN logo in a rounded badge (like the cards),
+  placed below the phone notch / Reels top bar (SAFE_TOP).
 - No on-screen sources card (sources go in the post text).
 Composited + concatenated with ffmpeg. Keys from secrets.json (elevenlabs, pexels, serper).
 Output: content/deep-dive/<slug>_9x16.mp4  (human review before publishing).
@@ -12,6 +16,7 @@ Output: content/deep-dive/<slug>_9x16.mp4  (human review before publishing).
 
 import base64
 import glob
+import html
 import io
 import json
 import os
@@ -34,8 +39,17 @@ POPPINS_BOLD = "C:/Windows/Fonts/Poppins-Bold.ttf"
 UA = {"User-Agent": "Mozilla/5.0 (GreaterNews DeepDive)"}
 # Wikimedia's API 403s browser-style "Mozilla/5.0 (...)" agents that aren't a real browser, which
 # silently disabled the Commons tier — it needs a plain tool-style agent (policy: meta.wikimedia.org/wiki/User-Agent_policy).
-WIKI_UA = {"User-Agent": "GreaterNews-DeepDive/1.0 (python-requests)"}
+# Downloading FILES from upload.wikimedia.org (news clips) additionally needs contact info in the agent
+# (an email or website, per the Wikimedia User-Agent policy) - without it they're throttled to HTTP 429.
+# Set it in secrets.json: {"wikimedia": {"contact": "https://your-site or you@example.com"}}.
+WIKI_CONTACT = ((SECRETS.get("wikimedia") or {}).get("contact") or "").strip()
+WIKI_UA = {"User-Agent": (f"GreaterNews-DeepDive/1.0 ({WIKI_CONTACT}) python-requests/{requests.__version__}"
+                          if WIKI_CONTACT else "GreaterNews-DeepDive/1.0 (python-requests)")}
 W, H = 1080, 1920
+# Reels safe zone (Meta guidance): the top ~14% sits under the notch/status bar + app top bar, and
+# the bottom ~30% under the page name, post caption and buttons. Keep brand marks and captions out.
+SAFE_TOP = 0.145
+CAPTION_MARGIN = 600   # caption baseline, px up from the bottom edge (was 520)
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -370,9 +384,9 @@ def _highlight_lines(words, per=3):
 
 def write_ass(words, path, style="word"):
     if style == "highlight":
-        header, lines = ass_header(84, margin_v=520), _highlight_lines(words)
+        header, lines = ass_header(84, margin_v=CAPTION_MARGIN), _highlight_lines(words)
     else:
-        header, lines = ass_header(116), _word_lines(words)
+        header, lines = ass_header(116, margin_v=CAPTION_MARGIN), _word_lines(words)
     open(path, "w", encoding="utf-8").write(header + "\n".join(lines) + "\n")
 
 
@@ -392,13 +406,15 @@ def brand_header(path):
     img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
 
-    cy = int(H * 0.060)                       # lockup centre-line, nudged down for safe margins
     text = "G R E A T E R N E W S"
     fs = int(W * 0.033)
     wm = font(fs)
     tb = d.textbbox((0, 0), text, font=wm)
     tw = tb[2] - tb[0]
     s = int(fs * 2.0)                         # badge sized to sit inline with the wordmark
+    # Badge top on the 14.5% line: higher up, the phone's notch / status bar and Facebook's Reels
+    # top bar cover it (it was at 6% and sat under the camera cut-out on some phones).
+    cy = int(H * SAFE_TOP) + s // 2           # lockup centre-line
     gap = int(W * 0.020)
     x0 = (W - (s + gap + tw)) // 2            # left edge of the whole lockup -> centred
 
@@ -593,6 +609,212 @@ def pexels_video(q, path):
     return True
 
 
+# ---- Real news footage, only when it's free to reuse ------------------------------------------
+# Wikimedia Commons hosts public-domain US-government news video (DVIDS military footage, VOA, the
+# White House) and CC-licensed clips from news events. Broadcaster footage (TV news, YouTube news
+# channels) is deliberately NOT used: Facebook's Rights Manager matches it and mutes/blocks the reel.
+COMMONS_API = "https://commons.wikimedia.org/w/api.php"
+CLIP_MAX_BYTES = 160 * 2**20
+
+
+def _strip_html(s):
+    text = html.unescape(re.sub(r"<[^>]+>", " ", s or ""))
+    return re.sub(r"\s+", " ", unicodedata.normalize("NFKC", text)).strip()
+
+
+def _clip_year(em):
+    for k in ("DateTimeOriginal", "DateTime"):      # when it was shot, else when it was uploaded
+        m = re.search(r"\b(19|20)\d\d\b", str((em.get(k) or {}).get("value") or ""))
+        if m:
+            return int(m.group(0))
+    return None
+
+
+def _clip_by(em):
+    """A short 'who shot it' for the on-screen credit and the post's footage line."""
+    artist = _strip_html((em.get("Artist") or {}).get("value"))
+    cats = str((em.get("Categories") or {}).get("value") or "")
+    if artist and "null" not in artist.lower() and len(artist) <= 48:
+        return artist
+    if "Voice of America" in cats or "VOA" in cats:
+        return "VOA"
+    if any(k in cats for k in ("PD US Military", "Department of Defense", "DVIDS")):
+        return "U.S. Dept. of Defense (DVIDS)"
+    if "White House" in cats:
+        return "The White House"
+    if "PD US Government" in cats:
+        return "U.S. Government"
+    return "Wikimedia Commons"
+
+
+def commons_clips(q):
+    r = requests.get(COMMONS_API, headers=WIKI_UA, timeout=30, params={
+        "action": "query", "format": "json", "generator": "search", "gsrnamespace": 6, "gsrlimit": 15,
+        "gsrsearch": f"filetype:video {q}", "prop": "videoinfo",
+        "viprop": "url|size|extmetadata|derivatives"})
+    pages = ((r.json().get("query") or {}).get("pages") or {}).values()
+    out = []
+    for p in sorted(pages, key=lambda p: p.get("index", 10**6)):   # search rank, not page id
+        vi = (p.get("videoinfo") or [{}])[0]
+        em = vi.get("extmetadata") or {}
+        out.append({
+            "title": p.get("title", "").split(":", 1)[-1].rsplit(".", 1)[0],
+            "desc": _strip_html((em.get("ImageDescription") or {}).get("value"))[:300],
+            "page": vi.get("descriptionurl") or "", "url": vi.get("url") or "",
+            "duration": float(vi.get("duration") or 0), "height": int(vi.get("height") or 0),
+            "size": int(vi.get("size") or 0), "derivatives": vi.get("derivatives") or [],
+            "license": _strip_html((em.get("LicenseShortName") or {}).get("value")) or "free license",
+            "by": _clip_by(em), "year": _clip_year(em)})
+    return out
+
+
+def _clip_source_url(c):
+    """A web-playable transcode: up to 1080p for short clips, 480p for long ones (smaller download)."""
+    cap = 1080 if c["duration"] <= 240 else 480
+    webm = [d for d in c["derivatives"]
+            if "webm" in (d.get("type") or "") and 360 <= int(d.get("height") or 0) <= cap]
+    if webm:
+        return max(webm, key=lambda d: int(d.get("height") or 0))["src"]
+    return c["url"] if c["size"] and c["size"] <= CLIP_MAX_BYTES else None
+
+
+def _download_commons(url, path):
+    """upload.wikimedia.org throttles bursts (429 + Retry-After) - wait once, then give up."""
+    for attempt in range(2):
+        with requests.get(url, headers=WIKI_UA, timeout=180, stream=True) as r:
+            if r.status_code == 429 and not WIKI_CONTACT:
+                print("    (Commons refused the clip download: add a contact to secrets.json -> "
+                      "wikimedia.contact so Wikimedia lets the downloads through; using a photo instead)")
+                return False
+            if r.status_code == 429 and attempt == 0:
+                wait = min(int(float(r.headers.get("retry-after") or 30)), 75)
+                print(f"    (Commons is throttling downloads; waiting {wait}s)")
+                time.sleep(wait)
+                continue
+            r.raise_for_status()
+            got = 0
+            with open(path, "wb") as h:
+                for chunk in r.iter_content(1 << 16):
+                    got += len(chunk)
+                    if got > CLIP_MAX_BYTES:
+                        raise ValueError("clip too large")
+                    h.write(chunk)
+            return True
+    return False
+
+
+def find_clip(vis, path, used):
+    """Footage for a 'clip' chapter -> {'path','label','credit'} or None (caller falls back to a still).
+    1) the spec's own file (footage you have the right to use): vis.file under content/, + vis.credit;
+    2) a free Commons clip that NAMES the query's subject, matches at least half its words, and is
+       recent (vis.since, default: this year or last) - old footage of a different strike or flood
+       under today's narration would mislead."""
+    own = vis.get("file")
+    if own:
+        p = own if os.path.isabs(own) else os.path.join(ROOT, "content", own)
+        if os.path.exists(p):
+            credit = (vis.get("credit") or "").strip()
+            return {"path": p, "start": vis.get("start"), "label": f"VIDEO: {credit}" if credit else "",
+                    "credit": {"by": credit, "title": os.path.basename(p), "license": "", "url": ""} if credit else None}
+        print(f"    (clip file not found: {own})")
+
+    q = vis["query"]
+    names, want = name_words(q), _stems(q)
+    need = max(1, -(-len(want) // 2))
+    this_year = time.gmtime().tm_year
+    since = int(vis.get("since") or this_year - 1)
+    try:
+        cands = commons_clips(q)
+    except Exception as e:
+        print(f"    (Commons video search failed: {str(e)[:60]})")
+        return None
+    best = None
+    for c in cands:
+        text = f"{c['title']} {c['desc']}"
+        if c["title"] in used or (names and not names_match(text, names)):
+            continue
+        score = len(want & _stems(text))
+        if score < need or not (4 <= c["duration"] <= 1800) or c["height"] < 360:
+            continue
+        if not c["year"] or c["year"] < since:
+            continue
+        if best is None or (score, c["year"]) > best[0]:          # ties keep Commons' rank order
+            best = ((score, c["year"]), c)
+    if not best:
+        return None
+    c = best[1]
+    src = _clip_source_url(c)
+    try:
+        if not src or not _download_commons(src, path):
+            return None
+    except Exception as e:
+        print(f"    (clip download failed: {str(e)[:60]})")
+        return None
+    used.add(c["title"])
+    print(f"    news clip: {c['title'][:70]} ({c['year']}, {c['license']}, matched {best[0][0]}/{len(want)})")
+    file_tag = "FILE · " if c["year"] < this_year else ""
+    return {"path": path, "start": None,
+            "label": f"{file_tag}VIDEO: {c['by']} · {c['year']} · {c['license']}",
+            "credit": {"by": c["by"], "title": c["title"], "license": c["license"], "url": c["page"]}}
+
+
+def _clip_start(clip_dur, need):
+    """Skip opening slates/titles (~12% in) but keep enough runway for the chapter."""
+    if clip_dur <= need + 1:
+        return 0.0
+    return max(0.0, min(max(2.0, clip_dur * 0.12), clip_dur - need - 0.5))
+
+
+def _probe_size(path):
+    out = subprocess.check_output(
+        ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height",
+         "-of", "csv=p=0", path], text=True, stdin=subprocess.DEVNULL, creationflags=NO_WINDOW).strip()
+    w, h = (int(x) for x in out.split(",")[:2])
+    return w, h
+
+
+CLIP_CENTER = 0.41   # where a landscape clip's picture sits: clear of the header above and the captions below
+
+
+def clip_layout(path):
+    """ffmpeg filter for a news clip -> [bg] at 1080x1920, plus the top of the picture (for the credit).
+    Vertical clips fill the frame. Landscape ones go in a 4:3 window (a slight centre zoom of 16:9,
+    so faces stay big) over a blurred, darkened copy of the same footage - the familiar news-reel look."""
+    cw, ch = _probe_size(path)
+    a = cw / ch
+    if a < 0.75:
+        return (f"[0:v]fps=30,scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},setsar=1[bg]",
+                int(H * SAFE_TOP) + 110)
+    fa = min(a, 4 / 3) if a >= 1 else a
+    fh = int(round(W / fa / 2)) * 2
+    fy = int(H * CLIP_CENTER - fh / 2)
+    fc = (f"[0:v]fps=30,split=2[cb][cf];"
+          f"[cb]scale=270:480:force_original_aspect_ratio=increase,crop=270:480,boxblur=10:2,"
+          f"scale={W}:{H},eq=brightness=-0.22:saturation=0.8[cbg];"
+          f"[cf]scale={W}:{fh}:force_original_aspect_ratio=increase,crop={W}:{fh},setsar=1[cfg];"
+          f"[cbg][cfg]overlay=0:{fy},setsar=1[bg]")
+    return fc, fy + 18
+
+
+def overlay_with_label(brand_png, label, y, out):
+    """The brand header plus a small credit tag ('VIDEO: VOA · 2026 · Public domain')."""
+    img = Image.open(brand_png).convert("RGBA")
+    if label:
+        d = ImageDraw.Draw(img)
+        try:
+            f = ImageFont.truetype("C:/Windows/Fonts/Poppins-SemiBold.ttf", 24)
+        except Exception:
+            f = font(24)
+        label = label if len(label) <= 64 else label[:63] + "…"
+        tb = d.textbbox((0, 0), label, font=f)
+        x, pad = 28, 12
+        d.rounded_rectangle([x, y, x + tb[2] - tb[0] + 2 * pad, y + tb[3] - tb[1] + 2 * pad],
+                            radius=10, fill=(0, 0, 0, 150))
+        d.text((x + pad - tb[0], y + pad - tb[1]), label, font=f, fill=(255, 255, 255, 235))
+    img.save(out)
+    return out
+
+
 COVER_SECS = 1.8   # opening card (also the Facebook thumbnail)
 END_SECS = 2.2     # closing brand card
 SEG_ENCODE = ["-r", "30", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-video_track_timescale", "30000",
@@ -757,6 +979,7 @@ def build(spec):
     voice = spec.get("voice", "elevenlabs")
     groq_voice = spec.get("groq_voice")
     cache, segments = {}, []
+    used_clips, credits = set(), []   # don't reuse one clip twice; credit every clip in the post
 
     # Opening card — the same design as the daily image posts; also saved as the video thumbnail.
     cover = render_cover(spec, work)
@@ -778,18 +1001,29 @@ def build(spec):
         dur = duration(mp3) + 0.4
 
         vis = ch["visual"]
-        key = (vis["type"], vis["query"])
+        key = (vis["type"], vis["query"], vis.get("file"))
         if key not in cache:
             base = os.path.join(work, f"a{len(cache)}")
-            if vis["type"] == "broll" and pexels_video(vis["query"], base + ".mp4"):
-                cache[key] = ("broll", base + ".mp4")
-            elif find_still(vis["query"], base + ".jpg"):  # stills, and b-roll with no clip that truly matches
-                cache[key] = ("still", base + ".jpg")
+            clip = find_clip(vis, base + ".clip", used_clips) if vis["type"] == "clip" else None
+            if clip:
+                cache[key] = ("clip", clip["path"], clip)
+                if clip["credit"]:
+                    credits.append(clip["credit"])
+            elif vis["type"] == "broll" and pexels_video(vis["query"], base + ".mp4"):
+                cache[key] = ("broll", base + ".mp4", None)
+            elif find_still(vis["query"], base + ".jpg"):  # stills, and broll/clips with nothing that truly matches
+                cache[key] = ("still", base + ".jpg", None)
             else:
-                cache[key] = (vis["type"], None)
-        kind, asset = cache[key]
+                cache[key] = (vis["type"], None, None)
+        kind, asset, clip = cache[key]
+        overlay = brand
 
-        if kind == "broll" and asset:
+        if kind == "clip" and asset:   # real news footage, muted under the narration
+            start = clip["start"] if clip["start"] is not None else _clip_start(duration(asset), dur)
+            vin = ["-ss", f"{float(start):.2f}", "-stream_loop", "-1", "-i", asset]
+            bg_fc, label_y = clip_layout(asset)
+            overlay = overlay_with_label(brand, clip["label"], label_y, os.path.join(work, f"ovl{i:02d}.png"))
+        elif kind == "broll" and asset:
             vin = ["-stream_loop", "-1", "-i", asset]
             bg_fc = f"[0:v]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},setsar=1[bg]"
         elif asset:  # still: pan WIDE images side-to-side (clean, full-frame); blurred-fill for tall ones
@@ -833,14 +1067,14 @@ def build(spec):
             f"[hb]subtitles=cap{i:02d}.ass:fontsdir=.[v];"
             f"[2:a]apad[aud]"  # pad voice with silence to the full clip length (a == v)
         )
-        args = vin + ["-loop", "1", "-i", brand, "-i", mp3, "-t", f"{dur:.3f}", "-filter_complex", fc,
+        args = vin + ["-loop", "1", "-i", overlay, "-i", mp3, "-t", f"{dur:.3f}", "-filter_complex", fc,
                       "-map", "[v]", "-map", "[aud]",
                       "-r", "30", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-video_track_timescale", "30000",
                       "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2",
                       os.path.join(work, f"seg{i:02d}.mp4")]
         ffmpeg(args, cwd=work)
         segments.append(os.path.join(work, f"seg{i:02d}.mp4"))
-        shown = kind + ("" if kind == vis["type"] else f" (no matching {vis['type']} clip)")
+        shown = kind + ("" if kind == vis["type"] else f" (no matching {vis['type']})")
         print(f"  chapter {i} ({shown}: {vis['query']}) {'OK' if asset else 'NO ASSET'} -> {dur:.1f}s")
 
     end_png = os.path.join(work, "end.png")
@@ -855,6 +1089,10 @@ def build(spec):
         add_music(concat_tmp, out, music)
     else:
         concat_reencode(segments, out)
+    # Footage credits for the post text (deep_dive_publish.py) - rewritten every build so a rebuild
+    # without clips doesn't leave stale credits behind.
+    with open(os.path.join(OUT_DIR, f"{slug}_credits.json"), "w", encoding="utf-8", newline="\n") as h:
+        json.dump({"footage": credits}, h, indent=2, ensure_ascii=False)
     print(f"Done: {out}  ({duration(out):.1f}s)")
     shutil.rmtree(work, ignore_errors=True)  # free the temp assets/segments
 

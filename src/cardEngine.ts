@@ -48,6 +48,11 @@ export const formatSizes: Record<CardFormat, { width: number; height: number; la
   story: { width: 1080, height: 1920, label: 'Story 9:16 — Status / Reels cover', suffix: '9x16' },
 };
 
+// On a full-screen 9:16 frame (Reels, Status) the phone's notch / status bar and the app's own
+// top bar cover roughly the top 14% (Meta's Reels safe-zone guidance), so a badge in the corner
+// sat under the camera cut-out. Keep top-anchored brand marks below this line on tall frames.
+export const STORY_SAFE_TOP = 0.145;
+
 export const templateMeta: Record<CardTemplate, { label: string; note: string }> = {
   headline: { label: 'Headline', note: 'The main story card — photo plus bold headline.' },
   quote: { label: 'Quote', note: 'A short attributed quote, spoken words front and center.' },
@@ -418,8 +423,10 @@ function drawBase(ctx: CanvasCtx, width: number, height: number, photoHeight: nu
 
 function drawLogoBadge(ctx: CanvasCtx, width: number, options: CardOptions) {
   const badgeSize = Math.round(width * 0.085);
-  const badgeMargin = Math.round(width * 0.055);
-  const badgeX = width - badgeMargin - badgeSize;
+  const badgeX = width - Math.round(width * 0.055) - badgeSize;
+  const badgeMargin = options.format === 'story'
+    ? Math.round(formatSizes.story.height * STORY_SAFE_TOP)
+    : Math.round(width * 0.055);
 
   tracePill(ctx, badgeX, badgeMargin, badgeSize, badgeSize, Math.round(badgeSize * 0.22));
   ctx.strokeStyle = 'rgba(255, 255, 255, 0.92)';
