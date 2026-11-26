@@ -6,8 +6,10 @@ and collects the rendered assets into content/<date>/assets/.
 Usage: python scripts/render_assets.py [YYYY-MM-DD]
 """
 
+import glob
 import json
 import os
+import shutil
 import socket
 import subprocess
 import sys
@@ -161,7 +163,37 @@ app = subprocess.Popen(
     stderr=subprocess.DEVNULL,
 )
 
+def kill_tree(proc):
+    """Stop a process AND its children (Popen.terminate() on Windows only ends the top one, which
+    left the node under `npx vite preview` running)."""
+    if proc and proc.poll() is None:
+        subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)], capture_output=True)
+
+
+def kill_render_edges(marker="gn-render-"):
+    """Stop headless Edge processes started by render runs, matched by their throwaway profile dir.
+    The msedge.exe we launch is only a stub that exits at once, so its browser/renderer/GPU
+    processes are orphans no process-tree kill can reach - 100+ of them had piled up (2026-11-26)."""
+    try:
+        import psutil
+    except ImportError:
+        return
+    for p in psutil.process_iter(["name", "cmdline"]):
+        try:
+            if (p.info["name"] or "").lower() == "msedge.exe" and marker in " ".join(p.info["cmdline"] or []):
+                p.kill()
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
+
+
+# Only one render can run at a time (fixed ports), so anything left from an earlier run is stale.
+kill_render_edges()
+for _old in glob.glob(os.path.join(tempfile.gettempdir(), "gn-render-*")):
+    shutil.rmtree(_old, ignore_errors=True)
+
+
 edge = None
+profile_dir = None
 try:
     if not wait_for(f"http://localhost:{APP_PORT}/render.html", 30):
         print("App server did not start.")
@@ -190,9 +222,12 @@ try:
     else:
         print("Timed out waiting for the renderer.")
 finally:
-    if edge:
-        edge.terminate()
-    app.terminate()
+    kill_tree(edge)
+    if profile_dir:   # this run's browser processes + throwaway profile
+        kill_render_edges(os.path.basename(profile_dir))
+        time.sleep(1)  # let Edge release its files
+        shutil.rmtree(profile_dir, ignore_errors=True)
+    kill_tree(app)
     server.shutdown()
 
 sys.exit(0 if done_event.is_set() and results["failed"] == 0 else 1)
