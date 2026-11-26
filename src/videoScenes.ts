@@ -9,8 +9,16 @@ const BG = '#060606';
 
 type Ctx = CanvasRenderingContext2D & { letterSpacing?: string };
 
-export type SceneKind = 'hero' | 'beat-photo' | 'beat-brand' | 'cta';
-export type VideoScene = { bitmap: HTMLCanvasElement; durationMs: number; kind: SceneKind };
+export type SceneKind = 'hero' | 'beat-photo' | 'beat-brand' | 'beat-clip' | 'cta';
+/** Real news footage for a beat (see newsClips.ts): played under the beat's text overlay. */
+export type BeatClip = { video: HTMLVideoElement; label: string; start: number };
+export type BeatMedia = HTMLImageElement | BeatClip | null;
+/** For 'beat-clip' scenes `bitmap` is a transparent overlay drawn over the moving `clip.video`. */
+export type VideoScene = { bitmap: HTMLCanvasElement; durationMs: number; kind: SceneKind; clip?: BeatClip };
+
+export function isBeatClip(media: BeatMedia | undefined): media is BeatClip {
+  return !!media && typeof media === 'object' && 'video' in media;
+}
 
 function makeCanvas(width: number, height: number) {
   const canvas = document.createElement('canvas');
@@ -240,6 +248,40 @@ function renderBeatPhoto(options: CardOptions, beat: Beat, width: number, height
   return canvas;
 }
 
+// A story beat over real footage: a TRANSPARENT overlay (dimming, text, brand row, credit tag) —
+// the video itself is drawn underneath at export time, frame by frame.
+function renderBeatClipOverlay(options: CardOptions, beat: Beat, width: number, height: number, label: string) {
+  const canvas = makeCanvas(width, height);
+  const ctx = canvas.getContext('2d') as Ctx;
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.42)';
+  ctx.fillRect(0, 0, width, height);
+  const fade = ctx.createLinearGradient(0, height * 0.35, 0, height);
+  fade.addColorStop(0, 'rgba(6, 6, 6, 0)');
+  fade.addColorStop(1, 'rgba(6, 6, 6, 0.85)');
+  ctx.fillStyle = fade;
+  ctx.fillRect(0, height * 0.35, width, height * 0.65);
+  drawBeatContent(ctx, options, beat, width, height);
+  if (label) {
+    // Credit tag under the brand row, left-aligned: "VIDEO: VOA · 2026 · Public domain".
+    const fontSize = Math.round(width * 0.022);
+    ctx.font = `600 ${fontSize}px ${FONT_STACK}`;
+    const text = label.length > 64 ? `${label.slice(0, 63)}…` : label;
+    const padX = Math.round(fontSize * 0.6);
+    const tagW = ctx.measureText(text).width + padX * 2;
+    const tagH = Math.round(fontSize * 1.9);
+    const x = Math.round(width * 0.055);
+    const y = badgeTop(width, height) + Math.round(width * 0.085) + Math.round(height * 0.014);
+    roundRect(ctx, x, y, tagW, tagH, Math.round(tagH * 0.32));
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+    ctx.fill();
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.92)';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, x + padX, y + tagH / 2 + 1);
+  }
+  return canvas;
+}
+
 // A story beat on the brand background (no photo).
 function renderBeatBrand(options: CardOptions, beat: Beat, width: number, height: number) {
   const canvas = makeCanvas(width, height);
@@ -310,9 +352,9 @@ function renderCta(options: CardOptions, width: number, height: number) {
 }
 
 // Build the full scene list. No beats → a single hero scene (today's behavior, unchanged).
-// beatPhotos supplies a per-beat image (index-aligned to the beats); each beat falls back to the
-// card's main photo, then to the brand background, so a partial list still works.
-export function buildScenes(options: CardOptions, beats: string[], beatPhotos: (HTMLImageElement | null)[] = []): VideoScene[] {
+// beatPhotos supplies a per-beat image OR news clip (index-aligned to the beats); each beat falls
+// back to the card's main photo, then to the brand background, so a partial list still works.
+export function buildScenes(options: CardOptions, beats: string[], beatPhotos: BeatMedia[] = []): VideoScene[] {
   const { width, height } = formatSizes[options.format];
   const hero = makeCanvas(width, height);
   drawCard(hero, options);
@@ -324,7 +366,12 @@ export function buildScenes(options: CardOptions, beats: string[], beatPhotos: (
 
   const scenes: VideoScene[] = [{ bitmap: hero, durationMs: 3500, kind: 'hero' }];
   clean.map(parseBeat).forEach((beat, index) => {
-    const photo = beatPhotos[index] ?? options.photo;
+    const media = beatPhotos[index];
+    if (isBeatClip(media)) {
+      scenes.push({ bitmap: renderBeatClipOverlay(options, beat, width, height, media.label), durationMs: 3200, kind: 'beat-clip', clip: media });
+      return;
+    }
+    const photo = media ?? options.photo;
     const onPhoto = photo !== null;
     scenes.push({
       bitmap: onPhoto ? renderBeatPhoto(options, beat, width, height, photo) : renderBeatBrand(options, beat, width, height),

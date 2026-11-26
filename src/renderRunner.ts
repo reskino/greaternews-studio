@@ -7,6 +7,9 @@ import { fetchArticleImage } from './article';
 import { findBestPhoto, loadImage, loadImageWithProxyFallback, neutralJusticeQuery } from './imageSearch';
 import { exportCardVideo, videoExportSupported } from './videoExport';
 import type { VideoSound } from './videoExport';
+import { findBestClip } from './newsClips';
+import { isBeatClip } from './videoScenes';
+import type { BeatMedia } from './videoScenes';
 
 const SERVER = 'http://localhost:5198';
 
@@ -34,6 +37,7 @@ type CardSpec = {
   scenes?: string[];
   narration?: string[];
   photoQueries?: (string | null)[];
+  clips?: boolean; // false = never use news clips for this card's beats (photos only)
   motion?: 'subtle' | 'dynamic' | 'minimal';
   sound?: VideoSound;
   music?: string; // a track in public/music/ (file name) or a full URL — overrides the synth bed
@@ -193,20 +197,31 @@ async function run() {
       }
 
       if (card.video && videoExportSupported()) {
-        // Per-beat photos: a licensed image per beat from its photoQuery (falls back to the main photo).
-        let beatPhotos: (HTMLImageElement | null)[] = [];
+        // Per-beat media from its photoQuery: REAL news footage when a free-to-reuse clip names the
+        // subject and is recent (Wikimedia Commons — see newsClips.ts; strict match), otherwise a
+        // licensed photo (falls back to the main photo). `clips: false` on a card turns clips off.
+        let beatPhotos: BeatMedia[] = [];
+        const usedClips = new Set<string>();
         if (card.photoQueries?.length) {
           beatPhotos = await Promise.all(
-            card.photoQueries.map(async (query) => {
+            card.photoQueries.map(async (query): Promise<BeatMedia> => {
               if (!query) return null;
+              if (card.clips !== false) {
+                const clip = await findBestClip(query, { strict: true, used: usedClips }).catch(() => null);
+                if (clip) {
+                  log(`${card.slug}: beat clip "${query}" — ${clip.title} (${clip.label})`, 'ok');
+                  return { video: clip.video, label: clip.label, start: clip.start };
+                }
+              }
               const best = await findBestPhoto(query).catch(() => null);
               if (best) log(`${card.slug}: beat photo "${query}" — ${best.credit}`, 'ok');
               return best?.image ?? null;
             }),
           );
         }
+        const hasClips = beatPhotos.some(isBeatClip);
         try {
-          const { blob, extension } = await withTimeout(exportCardVideo({ ...options, format: 'story' }, { scenes: card.scenes ?? [], narration: card.narration, beatPhotos, motion: card.motion, sound: card.sound, musicUrl: card.music ? (/^https?:/.test(card.music) ? card.music : `${SERVER}/music/${card.music.split('/').pop()}`) : undefined, voice: card.voice, voiceName: card.voiceName }), 90_000);
+          const { blob, extension } = await withTimeout(exportCardVideo({ ...options, format: 'story' }, { scenes: card.scenes ?? [], narration: card.narration, beatPhotos, motion: card.motion, sound: card.sound, musicUrl: card.music ? (/^https?:/.test(card.music) ? card.music : `${SERVER}/music/${card.music.split('/').pop()}`) : undefined, voice: card.voice, voiceName: card.voiceName }), hasClips ? 180_000 : 90_000); // clips are seeked frame by frame
           await upload(`${card.slug}_9x16.${extension}`, blob);
           rendered += 1;
           log(`✓ ${card.slug}_9x16.${extension} (${Math.round(blob.size / 1024)} KB)`, 'ok');

@@ -1,7 +1,7 @@
 import type { CardOptions } from './cardEngine';
 import { formatSizes } from './cardEngine';
 import { buildScenes } from './videoScenes';
-import type { VideoScene } from './videoScenes';
+import type { BeatMedia, VideoScene } from './videoScenes';
 import { scheduleBed } from './videoAudio';
 import type { VideoSound } from './videoAudio';
 import { Muxer, ArrayBufferTarget } from 'mp4-muxer';
@@ -19,7 +19,7 @@ export type VideoVoice = 'none' | 'google' | 'elevenlabs' | 'groq';
 export type VideoConfig = {
   scenes?: string[];
   narration?: string[];
-  beatPhotos?: (HTMLImageElement | null)[];
+  beatPhotos?: BeatMedia[]; // a photo or a real news clip per beat (see newsClips.ts)
   motion?: VideoMotion;
   sound?: VideoSound;
   musicUrl?: string; // a user-provided music track (overrides the synth bed when set)
@@ -104,6 +104,49 @@ function drawScene(ctx: CanvasRenderingContext2D, bitmap: HTMLCanvasElement, wid
   ctx.drawImage(bitmap, (width - drawnWidth) / 2 + offsetX, (height - drawnHeight) / 2, drawnWidth, drawnHeight);
 }
 
+// A clip beat: the current video frame, cover-fitted with the same push-in, then the text overlay.
+function drawClipScene(ctx: CanvasRenderingContext2D, scene: VideoScene, width: number, height: number, p: number, zoom: number, offsetX: number) {
+  const video = scene.clip!.video;
+  const vw = video.videoWidth || width;
+  const vh = video.videoHeight || height;
+  const scale = Math.max(width / vw, height / vh) * (1 + zoom * easeOutCubic(Math.max(0, Math.min(1, p))));
+  const dw = vw * scale;
+  const dh = vh * scale;
+  ctx.drawImage(video, (width - dw) / 2 + offsetX, (height - dh) / 2, dw, dh);
+  ctx.drawImage(scene.bitmap, offsetX, 0, width, height);
+}
+
+function drawAny(ctx: CanvasRenderingContext2D, scene: VideoScene, width: number, height: number, p: number, zoom: number, offsetX: number) {
+  if (scene.clip) drawClipScene(ctx, scene, width, height, p, zoom, offsetX);
+  else drawScene(ctx, scene.bitmap, width, height, p, zoom, offsetX);
+}
+
+// Clip frames advance at 15fps (each needs a seek) — smooth enough for footage, half the seeks.
+const CLIP_FPS = 15;
+
+function seekTo(video: HTMLVideoElement, time: number): Promise<void> {
+  if (Math.abs(video.currentTime - time) < 0.5 / CLIP_FPS) return Promise.resolve();
+  return new Promise((resolve) => {
+    const done = () => {
+      window.clearTimeout(timer);
+      video.removeEventListener('seeked', done);
+      resolve();
+    };
+    const timer = window.setTimeout(done, 1500); // never stall the export on a slow seek
+    video.addEventListener('seeked', done);
+    video.currentTime = time;
+  });
+}
+
+// Where in its clip a scene is `localMs` in: from the clip's start, looping if the beat outlasts it.
+function clipTime(scene: VideoScene, localMs: number) {
+  const { video, start } = scene.clip!;
+  const length = Number.isFinite(video.duration) && video.duration > 0 ? video.duration : start + 30;
+  const span = Math.max(0.5, length - start - 0.1);
+  const t = Math.floor((localMs / 1000) * CLIP_FPS) / CLIP_FPS;
+  return start + (t % span);
+}
+
 type Timeline = {
   width: number;
   height: number;
@@ -111,6 +154,10 @@ type Timeline = {
   totalMs: number;
   stage: HTMLCanvasElement;
   paint: (elapsed: number) => void;
+  /** Seek any clip visible at `elapsed` to the right frame (frame-exact export path). */
+  prepare: (elapsed: number) => Promise<void>;
+  /** Real-time path: play the visible clips, pause the rest. */
+  playLive: (elapsed: number) => void;
 };
 
 // Build the scene list, stretch it to the narration length, and produce a paint(elapsed) fn shared
@@ -147,13 +194,48 @@ function buildTimeline(options: CardOptions, config: VideoConfig, voiceBuffer: A
     throw new Error('Could not create the video canvas.');
   }
 
-  function paint(elapsed: number) {
+  function locate(elapsed: number) {
     const clamped = Math.max(0, Math.min(elapsed, totalMs - 1));
     let index = built.length - 1;
     while (index > 0 && clamped < starts[index]) {
       index -= 1;
     }
-    const local = clamped - starts[index];
+    return { index, local: clamped - starts[index] };
+  }
+
+  // The scenes on screen at `elapsed`: the current one, plus the next during a transition.
+  function visible(elapsed: number) {
+    const { index, local } = locate(elapsed);
+    const out: Array<{ scene: VideoScene; local: number }> = [{ scene: built[index], local }];
+    const remaining = built[index].durationMs - local;
+    if (index < built.length - 1 && style.transition !== 'cut' && remaining < style.transitionMs) {
+      out.push({ scene: built[index + 1], local: 0 });
+    }
+    return out;
+  }
+
+  async function prepare(elapsed: number) {
+    for (const { scene, local } of visible(elapsed)) {
+      if (scene.clip) await seekTo(scene.clip.video, clipTime(scene, local));
+    }
+  }
+
+  function playLive(elapsed: number) {
+    const on = new Set(visible(elapsed).filter((v) => v.scene.clip).map((v) => v.scene));
+    for (const scene of built) {
+      if (!scene.clip) continue;
+      const video = scene.clip.video;
+      if (on.has(scene) && video.paused) {
+        video.currentTime = scene.clip.start;
+        void video.play().catch(() => undefined);
+      } else if (!on.has(scene) && !video.paused) {
+        video.pause();
+      }
+    }
+  }
+
+  function paint(elapsed: number) {
+    const { index, local } = locate(elapsed);
     const duration = built[index].durationMs;
 
     ctx!.fillStyle = '#000000';
@@ -165,20 +247,20 @@ function buildTimeline(options: CardOptions, config: VideoConfig, voiceBuffer: A
     const a = inTransition ? easeOutCubic((style.transitionMs - remaining) / style.transitionMs) : 0;
 
     if (inTransition && style.transition === 'slide') {
-      drawScene(ctx!, built[index].bitmap, width, height, local / duration, style.zoom, -width * a);
-      drawScene(ctx!, built[index + 1].bitmap, width, height, 0, style.zoom, width * (1 - a));
+      drawAny(ctx!, built[index], width, height, local / duration, style.zoom, -width * a);
+      drawAny(ctx!, built[index + 1], width, height, 0, style.zoom, width * (1 - a));
     } else {
-      drawScene(ctx!, built[index].bitmap, width, height, local / duration, style.zoom, 0);
+      drawAny(ctx!, built[index], width, height, local / duration, style.zoom, 0);
       if (inTransition && style.transition === 'crossfade') {
         ctx!.save();
         ctx!.globalAlpha = a;
-        drawScene(ctx!, built[index + 1].bitmap, width, height, 0, style.zoom, 0);
+        drawAny(ctx!, built[index + 1], width, height, 0, style.zoom, 0);
         ctx!.restore();
       }
     }
   }
 
-  return { width, height, built, totalMs, stage, paint };
+  return { width, height, built, totalMs, stage, paint, prepare, playLive };
 }
 
 // Render music + narration into a single AudioBuffer, offline (faster than real-time, deterministic,
@@ -240,7 +322,7 @@ async function renderAudioMix(sound: VideoSound, musicBuffer: AudioBuffer | null
 // Preferred path: encode frames + audio deterministically with WebCodecs and mux to MP4. The audio
 // track is written straight from the rendered buffer, so it can't pick up capture artifacts.
 async function encodeWithWebCodecs(timeline: Timeline, audioBuffer: AudioBuffer | null, onProgress?: (progress: number) => void): Promise<VideoExportResult> {
-  const { width, height, totalMs, stage, paint } = timeline;
+  const { width, height, totalMs, stage, paint, prepare } = timeline;
 
   // Pick an H.264 profile the encoder actually supports at this resolution.
   const avcCandidates = ['avc1.640028', 'avc1.4d0028', 'avc1.42e028', 'avc1.640033'];
@@ -307,7 +389,9 @@ async function encodeWithWebCodecs(timeline: Timeline, audioBuffer: AudioBuffer 
   for (let i = 0; i < totalFrames; i += 1) {
     if (encodeError) throw encodeError;
     const elapsed = (i * 1000) / FPS;
-    paint(elapsed >= totalMs ? totalMs - 1 : elapsed);
+    const at = elapsed >= totalMs ? totalMs - 1 : elapsed;
+    await prepare(at); // seek any news clip on screen to this frame (no-op for photo scenes)
+    paint(at);
     const frame = new VideoFrame(stage, { timestamp: Math.round((i * 1_000_000) / FPS), duration: frameDurUs });
     videoEncoder.encode(frame, { keyFrame: i % FPS === 0 });
     frame.close();
@@ -374,7 +458,7 @@ async function exportViaMediaRecorder(
   if (!mimeType) {
     throw new Error('This browser cannot record video from a canvas.');
   }
-  const { totalMs, stage, paint } = timeline;
+  const { totalMs, stage, paint, playLive, built } = timeline;
   const hasMusic = sound !== 'none' || !!musicBuffer;
 
   let audioCtx: AudioContext | null = null;
@@ -444,6 +528,7 @@ async function exportViaMediaRecorder(
   await new Promise<void>((resolve) => {
     function tick(now: number) {
       const elapsed = now - start;
+      playLive(elapsed); // real-time path: news clips simply play while their beat is on screen
       paint(elapsed);
       onProgress?.(Math.min(1, elapsed / totalMs));
       if (elapsed < totalMs) {
@@ -458,6 +543,7 @@ async function exportViaMediaRecorder(
   paint(totalMs - 1);
   await new Promise((resolve) => window.setTimeout(resolve, HOLD_MS));
   recorder.stop();
+  built.forEach((scene) => scene.clip?.video.pause());
 
   const blob = await stopped;
   if (audioCtx) {
