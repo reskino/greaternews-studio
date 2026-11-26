@@ -217,34 +217,55 @@ export function filterByExcludeTerms(results: ImageResult[], excludeTerms: strin
 }
 
 // Consecutive capitalized-word runs name the people, places, and organizations in a headline.
+// The person a headline quotes ("… – Hopeson Adorye", "…: Mahama says") is usually the best photo.
+const SPEAKER_TAIL = /[–—-]\s*((?:[A-Z][\p{L}'.-]+\s+){0,3}[A-Z][\p{L}'.-]+)\s*$/u;
+const ACRONYM = /^[A-Z]{2,7}s?$/;
+
 export function extractEntities(headline: string): string[] {
-  const words = headline
+  const tail = headline.match(SPEAKER_TAIL)?.[1]?.trim();
+  // The attribution can be an organisation acronym ("… - BoG"): expand it like any other acronym.
+  const speaker = tail ? (ghanaAcronyms[tail.toLowerCase()] ?? tail) : undefined;
+  const body = speaker ? headline.replace(SPEAKER_TAIL, '') : headline;
+  const words = body
     .replace(/[^\p{L}\p{N}\s'-]/gu, ' ')
     .split(/\s+/)
     .filter(Boolean);
+  // Title-case headlines capitalise ordinary words too: a capitalised word that ALSO appears in
+  // lowercase in the same headline ("Collapsed … collapsed banks") is not a name.
+  const lowercaseWords = new Set(words.filter((word) => /^[a-z]/.test(word)).map((word) => word.toLowerCase()));
+  const generic = (word: string) => STOPWORDS.has(word.toLowerCase()) || lowercaseWords.has(word.toLowerCase());
 
-  const entities: string[] = [];
+  const runs: string[] = [];
+  const acronyms: string[] = [];
   let run: string[] = [];
+  const flush = (index: number) => {
+    // The first headline word is capitalized by convention; only keep a leading single word if it looks like a name elsewhere too.
+    if (run.length > 1 || (run.length === 1 && index - run.length > 0)) {
+      runs.push(run.join(' '));
+    }
+    run = [];
+  };
 
   words.forEach((word, index) => {
-    const isCapitalized = /^[A-Z]/.test(word) && !STOPWORDS.has(word.toLowerCase());
-    if (isCapitalized) {
+    if (ACRONYM.test(word)) {
+      // "NPP Collapsed" must not become one phrase: an acronym stands alone and is expanded
+      // (NPP -> New Patriotic Party), so a search can't read it as "nuclear power plant".
+      flush(index);
+      acronyms.push(ghanaAcronyms[word.toLowerCase()] ?? word);
+      return;
+    }
+    if (/^[A-Z]/.test(word) && !generic(word)) {
       run.push(word);
     } else {
-      // The first headline word is capitalized by convention; only keep a leading single word if it looks like a name elsewhere too.
-      if (run.length > 1 || (run.length === 1 && index - run.length > 0)) {
-        entities.push(run.join(' '));
-      }
-      run = [];
+      flush(index);
     }
   });
-  if (run.length > 0) {
-    entities.push(run.join(' '));
-  }
+  flush(words.length);
 
-  const expanded = entities.map((entity) => ghanaAcronyms[entity.toLowerCase()] ?? entity);
-
-  return [...new Set(expanded)].filter((entity) => entity.length > 2).slice(0, 3);
+  const expanded = runs.map((entity) => ghanaAcronyms[entity.toLowerCase()] ?? entity);
+  const ordered = [...(speaker ? [speaker] : []), ...expanded.filter((entity) => entity.includes(' ')),
+    ...acronyms, ...expanded.filter((entity) => !entity.includes(' '))];
+  return [...new Set(ordered)].filter((entity) => entity.length > 2).slice(0, 3);
 }
 
 type WikiSearchPage = {

@@ -347,6 +347,20 @@ export default function CardDesigner({
     setResults([]);
 
     try {
+      // Claude (via the GreaterNews helper on this PC) reads the headline like an editor: "NPP" here is
+      // Ghana's New Patriotic Party, not a nuclear power plant, and the person quoted is the photo.
+      // Sensitive stories keep the neutral-imagery path in findStoryImages; no helper -> heuristics.
+      const plan = await resolveQuery(
+        suggestedHeadline,
+        `This is a news headline (${suggestedCategory}). Plan searches for the best photo SUBJECT for its card: the person quoted or named first, else the organisation, place or object the story is about.`,
+      ).catch(() => null);
+      if (plan && !plan.sensitive && plan.searchQueries.length) {
+        setPlan(plan);
+        setStoryQueries(plan.searchQueries);
+        await runQueries(plan.searchQueries, plan.excludeTerms);
+        setSearching(false);
+        return;
+      }
       const { results: found, queries } = await findStoryImages(suggestedHeadline, suggestedCategory);
       setStoryQueries(queries);
       setResults(found);
